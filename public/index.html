@@ -1,0 +1,1797 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Precificador Industrial · Arte Cúbica</title>
+<style>
+:root{
+  --bg:#f4f6fb; --surface:#ffffff; --surface-2:#f8fafc; --border:#e5e9f2;
+  --text:#0f172a; --muted:#64748b; --primary:#3b5bdb; --primary-weak:#e7ecff;
+  --green:#16a34a; --green-bg:#dcfce7; --amber:#d97706; --amber-bg:#fef3c7;
+  --red:#dc2626; --red-bg:#fee2e2; --shadow:0 1px 2px rgba(15,23,42,.06),0 4px 16px rgba(15,23,42,.06);
+  --radius:14px;
+}
+[data-theme="dark"]{
+  --bg:#0b1020; --surface:#131a2e; --surface-2:#0f1626; --border:#243049;
+  --text:#e6ecf7; --muted:#8ea0bf; --primary:#6b8afd; --primary-weak:#1c2745;
+  --green:#4ade80; --green-bg:#0f2e1c; --amber:#fbbf24; --amber-bg:#2e2410;
+  --red:#f87171; --red-bg:#331414; --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,-apple-system,Roboto,Arial,sans-serif;background:var(--bg);color:var(--text);font-size:14px;-webkit-font-smoothing:antialiased}
+button{font-family:inherit;cursor:pointer}
+input,select{font-family:inherit}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:8px}
+
+/* Layout */
+.app{display:grid;grid-template-columns:248px 1fr;min-height:100vh}
+.sidebar{background:var(--surface);border-right:1px solid var(--border);padding:18px 14px;position:sticky;top:0;height:100vh;overflow:auto}
+.brand{display:flex;align-items:center;gap:10px;padding:6px 8px 18px;font-weight:700;font-size:16px}
+.brand .logo{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,var(--primary),#8b5cf6);display:grid;place-items:center;color:#fff;font-weight:800}
+.brand small{display:block;font-weight:500;color:var(--muted);font-size:11px}
+.nav{display:flex;flex-direction:column;gap:2px}
+.nav button{display:flex;align-items:center;gap:11px;width:100%;text-align:left;background:none;border:none;color:var(--muted);padding:10px 12px;border-radius:10px;font-size:13.5px;font-weight:500}
+.nav button:hover{background:var(--surface-2);color:var(--text)}
+.nav button.active{background:var(--primary-weak);color:var(--primary);font-weight:600}
+.nav .ico{width:18px;text-align:center}
+.nav .sep{margin:12px 12px 6px;font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);font-weight:700}
+
+.main{display:flex;flex-direction:column;min-width:0}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 26px;border-bottom:1px solid var(--border);background:var(--surface);position:sticky;top:0;z-index:20}
+.topbar h1{font-size:17px;font-weight:700}
+.topbar .sub{color:var(--muted);font-size:12.5px;font-weight:400}
+.top-actions{display:flex;align-items:center;gap:10px}
+.chip{display:inline-flex;align-items:center;gap:7px;background:var(--surface-2);border:1px solid var(--border);padding:7px 12px;border-radius:20px;font-size:12.5px;font-weight:600}
+.content{padding:24px 26px;max-width:1280px;width:100%}
+
+/* Cards */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow)}
+.card .hd{padding:16px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.card .hd h3{font-size:14.5px}
+.card .hd .desc{color:var(--muted);font-size:12px;font-weight:400;margin-top:2px}
+.card .bd{padding:18px}
+.grid{display:grid;gap:18px}
+.g-2{grid-template-columns:repeat(2,1fr)}
+.g-3{grid-template-columns:repeat(3,1fr)}
+.g-4{grid-template-columns:repeat(4,1fr)}
+@media(max-width:1050px){.g-3,.g-4{grid-template-columns:repeat(2,1fr)}}
+.menu-btn{display:none}
+#menuOverlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:55}
+.prod-thumb{width:58px;height:58px;border-radius:10px;object-fit:cover;border:1px solid var(--border);flex:none}
+.prod-img-lg{width:100%;max-height:180px;object-fit:contain;border-radius:10px;border:1px solid var(--border);background:var(--surface-2)}
+.img-drop{border:1px dashed var(--border);border-radius:10px;padding:14px;text-align:center;cursor:pointer;background:var(--surface-2)}
+@media(max-width:820px){
+  .app{grid-template-columns:1fr}
+  .g-2,.g-3,.g-4{grid-template-columns:1fr}
+  .sidebar{position:fixed;top:0;left:0;height:100vh;width:250px;z-index:60;transform:translateX(-100%);transition:transform .25s;box-shadow:0 10px 40px rgba(0,0,0,.35)}
+  .sidebar.open{transform:none}
+  .menu-btn{display:inline-flex!important}
+  #menuOverlay.show{display:block}
+  .content{padding:14px}
+  .topbar{padding:11px 13px}
+  .topbar h1{font-size:15.5px}
+  .hide-mobile{display:none!important}
+  .card .hd{padding:13px 14px;flex-wrap:wrap;gap:8px}
+  .card .bd{padding:14px}
+  .kpi .val{font-size:22px}
+  table{font-size:12.5px}
+  th,td{padding:9px 10px}
+  .sub-tabs{width:100%;overflow:auto}
+}
+
+/* Form */
+.field{margin-bottom:12px}
+.field label{display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:5px}
+.inp{width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:9px;background:var(--surface-2);color:var(--text);font-size:13.5px;outline:none;transition:.15s}
+.inp:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-weak)}
+.inp-group{position:relative}
+.inp-group .suffix{position:absolute;right:11px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:12px;pointer-events:none}
+.btn{display:inline-flex;align-items:center;gap:7px;padding:9px 15px;border-radius:9px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-weight:600;font-size:13px}
+.btn:hover{background:var(--surface-2)}
+.btn.primary{background:var(--primary);border-color:var(--primary);color:#fff}
+.btn.primary:hover{filter:brightness(1.06)}
+.btn.sm{padding:6px 11px;font-size:12px}
+.btn.danger{color:var(--red);border-color:var(--red-bg)}
+
+/* KPI */
+.kpi{padding:16px 18px}
+.kpi .lbl{color:var(--muted);font-size:12px;font-weight:600;display:flex;align-items:center;gap:7px}
+.kpi .val{font-size:26px;font-weight:800;margin-top:8px;letter-spacing:-.5px}
+.kpi .delta{font-size:11.5px;margin-top:4px;color:var(--muted)}
+
+/* Table */
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:700;padding:10px 12px;border-bottom:1px solid var(--border)}
+td{padding:11px 12px;border-bottom:1px solid var(--border)}
+tbody tr:hover{background:var(--surface-2)}
+.tag{display:inline-block;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700}
+.tag.green{background:var(--green-bg);color:var(--green)}
+.tag.amber{background:var(--amber-bg);color:var(--amber)}
+.tag.red{background:var(--red-bg);color:var(--red)}
+.tag.blue{background:var(--primary-weak);color:var(--primary)}
+
+/* Breakdown */
+.brk{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px dashed var(--border);font-size:13px}
+.brk:last-child{border:none}
+.brk .k{color:var(--muted)}
+.brk .v{font-weight:600;font-variant-numeric:tabular-nums}
+.brk.total{border-top:2px solid var(--border);margin-top:6px;padding-top:12px;font-size:15px}
+.brk.total .k{color:var(--text);font-weight:700}
+.brk.total .v{font-weight:800;color:var(--primary);font-size:17px}
+
+/* Gauge */
+.gauge-wrap{text-align:center}
+.gauge-label{font-size:34px;font-weight:800;letter-spacing:-1px}
+.gauge-status{font-weight:700;font-size:14px;margin-top:2px}
+.status-pill{display:inline-flex;align-items:center;gap:8px;padding:8px 16px;border-radius:24px;font-weight:700;font-size:14px;margin-top:10px}
+
+/* misc */
+.muted{color:var(--muted)}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.hidden{display:none!important}
+.sub-tabs{display:flex;gap:6px;background:var(--surface-2);padding:5px;border-radius:11px;margin-bottom:18px;width:fit-content}
+.sub-tabs button{padding:8px 16px;border:none;background:none;border-radius:8px;font-weight:600;font-size:13px;color:var(--muted)}
+.sub-tabs button.active{background:var(--surface);color:var(--text);box-shadow:var(--shadow)}
+.formula{background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:13px 15px;font-family:'Consolas',monospace;font-size:12.5px;color:var(--muted);line-height:1.7;overflow:auto}
+.formula b{color:var(--primary)}
+.slider{width:100%;accent-color:var(--primary)}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:11.5px;color:var(--muted);margin-top:10px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.dot{width:9px;height:9px;border-radius:50%}
+.bar-track{height:9px;background:var(--surface-2);border-radius:6px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px}
+.hint{font-size:11.5px;color:var(--muted);margin-top:4px}
+.login-screen{position:fixed;inset:0;background:var(--bg);display:grid;place-items:center;z-index:100}
+.login-card{width:380px;max-width:92vw}
+.badge-lvl{font-size:11px;padding:2px 8px;border-radius:6px;background:var(--primary-weak);color:var(--primary);font-weight:700}
+.modal-bg{position:fixed;inset:0;background:rgba(15,23,42,.55);display:grid;place-items:center;z-index:200;padding:20px}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow);width:660px;max-width:100%;max-height:92vh;display:flex;flex-direction:column}
+.modal-hd{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+.modal-bd{padding:20px;overflow:auto}
+.modal-ft{padding:14px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:10px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:2px}
+.chip-x{display:inline-flex;align-items:center;gap:9px;background:var(--primary-weak);color:var(--primary);padding:6px 11px;border-radius:8px;font-weight:600;font-size:12.5px}
+.chip-x b{cursor:pointer;opacity:.6;font-size:14px;line-height:1}
+.chip-x b:hover{opacity:1}
+.add-row{display:flex;gap:8px;margin-top:8px}
+.eng-tot{text-align:right;font-variant-numeric:tabular-nums}
+.print-only{display:none}
+@media print{
+  body{background:#fff}
+  .sidebar,.topbar,.no-print,#modalRoot{display:none!important}
+  .app{display:block}
+  .content{padding:0;max-width:none}
+  .print-only{display:block}
+  .card{box-shadow:none;border:1px solid #ccc}
+  .eng-block{page-break-after:always;break-after:page}
+  .eng-block:last-of-type{page-break-after:auto}
+  .eng-block.skip-print{display:none!important}
+  .eng-block .no-print{display:none!important}
+  input,select{border:none!important;background:transparent!important;padding:0!important;-webkit-appearance:none;appearance:none}
+}
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div class="login-screen" id="loginScreen">
+  <div class="card login-card">
+    <div class="bd" style="padding:30px">
+      <div class="brand" style="padding:0 0 20px;justify-content:center">
+        <div class="logo">AC</div>
+        <div>Precificador Industrial<small>Arte Cúbica · Estofados & Colchões</small></div>
+      </div>
+      <div class="field"><label>E-mail</label><input class="inp" id="lgEmail" value="admin@artecubica.com.br"></div>
+      <div class="field"><label>Senha</label><input class="inp" type="password" id="lgPass" value="admin"></div>
+      <button class="btn primary" style="width:100%;justify-content:center;margin-top:6px" onclick="doLogin()">Entrar</button>
+      <p class="hint" id="lgMsg" style="text-align:center;margin-top:12px">Sessão segura (JWT no sistema final)</p>
+    </div>
+  </div>
+</div>
+
+<div class="app hidden" id="appRoot">
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="brand"><div class="logo">AC</div><div>Precificador<small>Arte Cúbica</small></div></div>
+    <nav class="nav" id="nav">
+      <div class="sep">Principal</div>
+      <button data-view="dashboard" class="active"><span class="ico">◧</span> Dashboard</button>
+      <button data-view="calc"><span class="ico">⚡</span> Precificação</button>
+      <button data-view="simulador"><span class="ico">◑</span> Simulador</button>
+      <div class="sep">Cadastros</div>
+      <button data-view="produtos"><span class="ico">▤</span> Produtos</button>
+      <button data-view="materiaprima"><span class="ico">🧱</span> Matéria-Prima</button>
+      <button data-view="engenharia"><span class="ico">📐</span> Engenharia</button>
+      <button data-view="impostos"><span class="ico">%</span> Impostos & Despesas</button>
+      <div class="sep">Análise</div>
+      <button data-view="relatorios"><span class="ico">▦</span> Relatórios</button>
+      <button data-view="config"><span class="ico">⚙</span> Configurações</button>
+    </nav>
+    <div style="margin-top:24px;padding:12px;border-radius:11px;background:var(--surface-2);font-size:12px" id="userBox"></div>
+  </aside>
+
+  <!-- MAIN -->
+  <div class="main">
+    <div class="topbar">
+      <div class="row" style="gap:10px;align-items:center">
+        <button class="btn sm menu-btn" onclick="toggleMenu()" aria-label="Menu">☰</button>
+        <div><h1 id="viewTitle">Dashboard</h1><div class="sub" id="viewSub">Visão geral da precificação</div></div>
+      </div>
+      <div class="top-actions">
+        <span class="chip hide-mobile" id="empChip">🏢 Arte Cúbica Matriz</span>
+        <span class="chip hide-mobile" id="cloudChip" title="Sincronização com o servidor (PostgreSQL)">☁ offline</span>
+        <button class="btn sm" onclick="toggleTheme()" id="themeBtn">🌙 Escuro</button>
+        <button class="btn sm" onclick="logout()">Sair</button>
+      </div>
+    </div>
+    <div class="content" id="content"></div>
+  </div>
+</div>
+
+<div id="menuOverlay" onclick="closeMenu()"></div>
+<div id="modalRoot"></div>
+
+<script>
+/* ============================================================
+   PRECIFICADOR INDUSTRIAL — Método da Margem de Contribuição
+   Arquivo único · dados persistidos em localStorage
+   ============================================================ */
+
+const money = n => (isFinite(n)?n:0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+const pct = n => (isFinite(n)?n:0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+'%';
+const num = v => { const n = parseFloat(String(v).replace(',','.')); return isFinite(n)?n:0; };
+const uid = () => Math.random().toString(36).slice(2,9);
+
+/* ---------- Estado / persistência ---------- */
+const DB_KEY = 'precificador_artecubica_v2';
+const DEFAULTS = {
+  taxes: { icms:12, pis:1.65, cofins:7.6, ipi:0, irpj:2.28, csll:1.44, iss:0, outros:0 },
+  desp:  { freteVenda:2, marketplace:0, bonificacoes:0, descontos:0, marketing:1, outras:0.5 },
+  comissao: 3,
+  margemAlvo: 35,
+  margemMin: 30,
+  produtos: [],
+  materiais: [],
+  engenharias: [],
+  historico: [],
+  empresa: 'Arte Cúbica Matriz'
+};
+
+let DB = load();
+ensureDBDefaults();
+function ensureDBDefaults(){
+  DB.materiais=DB.materiais||[]; DB.engenharias=DB.engenharias||[]; DB.produtos=DB.produtos||[]; DB.historico=DB.historico||[];
+  DB.menuPerms=DB.menuPerms||defaultMenuPerms();
+  DB.perfis=DB.perfis||defaultPerfis();
+  DB.usuarios=DB.usuarios||defaultUsuarios();
+  DB.perfis.forEach(pf=>{ if(!pf.admin && !DB.menuPerms[pf.key]) DB.menuPerms[pf.key]=baseMenuPerms(); });
+}
+function defaultPerfis(){ return [
+  {key:'admin',nome:'Administrador',admin:true,editar:true},
+  {key:'gestor',nome:'Gestor',admin:false,editar:true},
+  {key:'vendedor',nome:'Vendedor',admin:false,editar:false}
+];}
+function defaultUsuarios(){ return [
+  {id:uid(),nome:'Evandro Zílio',email:'admin@artecubica.com.br',senha:'admin',cargo:'Diretoria',departamento:'Administração',perfil:'admin',status:'Ativo'},
+  {id:uid(),nome:'Gestor Comercial',email:'gestor@artecubica.com.br',senha:'123456',cargo:'Comercial',departamento:'Comercial',perfil:'gestor',status:'Ativo'},
+  {id:uid(),nome:'Vendedor Loja 1',email:'vendedor@artecubica.com.br',senha:'123456',cargo:'Vendas',departamento:'Vendas',perfil:'vendedor',status:'Ativo'}
+];}
+function baseMenuPerms(){ return {dashboard:true,calc:true,simulador:true,produtos:true,materiaprima:false,engenharia:false,impostos:false,relatorios:true,config:false}; }
+function load(){
+  try{ const raw = localStorage.getItem(DB_KEY); if(raw){ const d=JSON.parse(raw); d.materiais=d.materiais||[]; d.engenharias=d.engenharias||[]; d.menuPerms=d.menuPerms||defaultMenuPerms(); return d; } }catch(e){}
+  const seed = JSON.parse(JSON.stringify(DEFAULTS));
+  seedData(seed);
+  return seed;
+}
+function save(){ localStorage.setItem(DB_KEY, JSON.stringify(DB)); cloudMarkDirty(); }
+function resetDB(){ if(confirm('Limpar todos os dados? Isso apaga produtos e histórico e reinicia o sistema vazio.')){ localStorage.removeItem(DB_KEY); DB=load(); ensureDBDefaults(); render(); } }
+
+/* ================= Sincronização com o backend (PostgreSQL) =================
+   O app continua funcionando offline (localStorage). Quando um servidor é
+   configurado em Configurações, os dados são carregados e salvos no banco. */
+const CLOUD_KEY='precificador_cloud';
+let cloudState={connected:false, timer:null};
+function cloudCfg(){ try{ return JSON.parse(localStorage.getItem(CLOUD_KEY))||{}; }catch(e){ return {}; } }
+function cloudSetCfg(c){ localStorage.setItem(CLOUD_KEY, JSON.stringify(c)); }
+function cloudUrl(){ return (cloudCfg().url||'').trim().replace(/\/+$/,''); }
+function setCloudStatus(txt,color){ const c=el('cloudChip'); if(c){ c.textContent='☁ '+txt; c.style.color=color||'var(--muted)'; } }
+async function cloudLogin(){
+  const cfg=cloudCfg(); const base=cloudUrl(); if(!base) throw new Error('URL não configurada');
+  const res=await fetch(base+'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:cfg.email,senha:cfg.senha})});
+  if(!res.ok) throw new Error('login no servidor falhou');
+  const j=await res.json(); cfg.token=j.accessToken; cloudSetCfg(cfg); return j;
+}
+async function cloudApi(path, opts={}){
+  const base=cloudUrl(); const headers=Object.assign({'Content-Type':'application/json'}, opts.headers||{});
+  let cfg=cloudCfg(); if(cfg.token) headers['Authorization']='Bearer '+cfg.token;
+  let res=await fetch(base+path, {...opts, headers});
+  if(res.status===401){ await cloudLogin(); cfg=cloudCfg(); headers['Authorization']='Bearer '+cfg.token; res=await fetch(base+path, {...opts, headers}); }
+  return res;
+}
+async function cloudConnect(silent){
+  if(!cloudUrl()||!cloudCfg().email){ if(!silent) alert('Configure a URL e as credenciais do servidor.'); return false; }
+  try{
+    setCloudStatus('conectando…','var(--amber)');
+    await cloudLogin();
+    await cloudPull();
+    cloudState.connected=true; setCloudStatus('conectado','var(--green)');
+    if(!silent) alert('Conectado ao servidor. Dados sincronizados com o PostgreSQL.');
+    return true;
+  }catch(e){ cloudState.connected=false; setCloudStatus('offline','var(--red)'); if(!silent) alert('Falha ao conectar: '+e.message); return false; }
+}
+async function cloudPull(){
+  const res=await cloudApi('/api/state?chave=default');
+  if(!res.ok) throw new Error('não foi possível ler o estado');
+  const j=await res.json();
+  if(j && j.data){ DB=j.data; ensureDBDefaults(); localStorage.setItem(DB_KEY, JSON.stringify(DB)); if(SESSION) render(); }
+  else { await cloudPush(true); } // servidor vazio → sobe o estado local
+}
+function cloudMarkDirty(){ if(!cloudState.connected) return; clearTimeout(cloudState.timer); cloudState.timer=setTimeout(()=>cloudPush(false), 1500); }
+async function cloudPush(immediate){
+  if(!cloudState.connected && !immediate) return;
+  if(!cloudUrl()) return;
+  try{
+    setCloudStatus('salvando…','var(--amber)');
+    const res=await cloudApi('/api/state',{method:'PUT',body:JSON.stringify({chave:'default',data:DB})});
+    if(!res.ok) throw new Error();
+    setCloudStatus('salvo','var(--green)');
+  }catch(e){ setCloudStatus('erro ao salvar','var(--red)'); }
+}
+function cloudDisconnect(){ const cfg=cloudCfg(); cfg.token=''; cloudSetCfg(cfg); cloudState.connected=false; setCloudStatus('offline'); render(); }
+function salvarCloud(){
+  cloudSetCfg({ url:el('clUrl').value.trim(), email:el('clEmail').value.trim(), senha:el('clSenha').value, token:'' });
+  cloudConnect(false);
+}
+
+/* ---------- Inicialização (sem produtos pré-cadastrados) ---------- */
+function seedData(db){
+  db.produtos = [];
+  db.historico.push({id:uid(),user:'Sistema',acao:'Sistema iniciado sem produtos',campo:'—',ant:'—',novo:'0 produtos',data:new Date().toISOString()});
+}
+
+/* ============================================================
+   NÚCLEO DE CÁLCULO — Margem de Contribuição (método divisor)
+   PV = CustoTotal / (1 - Σ%variáveis - Margem%)
+   ============================================================ */
+function somaPercentuais(taxes, desp, comissao){
+  const t = Object.values(taxes).reduce((a,b)=>a+num(b),0);
+  const d = Object.values(desp).reduce((a,b)=>a+num(b),0);
+  return (t + d + num(comissao))/100; // fração
+}
+
+// Calcula preço a partir da margem-alvo (formação de preço)
+function precificar({custo, taxes, desp, comissao, margem}){
+  const soma = somaPercentuais(taxes, desp, comissao);
+  const m = num(margem)/100;
+  const divisor = 1 - soma - m;
+  const preco = divisor>0 ? custo/divisor : Infinity;
+  return montarResultado(preco, {custo, taxes, desp, comissao});
+}
+
+// Calcula margem a partir de um preço dado (simulador/preço manual)
+function margemDoPreco(preco, {custo, taxes, desp, comissao}){
+  return montarResultado(preco, {custo, taxes, desp, comissao});
+}
+
+function montarResultado(preco, {custo, taxes, desp, comissao}){
+  const impostos = {};
+  let impostosTotal = 0;
+  for(const k in taxes){ const v = preco*num(taxes[k])/100; impostos[k]=v; impostosTotal+=v; }
+  const despesas = {};
+  let despesasTotal = 0;
+  for(const k in desp){ const v = preco*num(desp[k])/100; despesas[k]=v; despesasTotal+=v; }
+  const comissaoRs = preco*num(comissao)/100;
+  const mc = preco - custo - impostosTotal - comissaoRs - despesasTotal; // margem de contribuição R$
+  const mcPct = preco>0 ? (mc/preco)*100 : 0;
+  return { preco, custo, impostos, impostosTotal, despesas, despesasTotal, comissaoRs, mc, mcPct,
+           somaPct: somaPercentuais(taxes,desp,comissao)*100 };
+}
+
+// Desconto máximo mantendo margem mínima
+function descontoMaximo({custo, taxes, desp, comissao, precoLista, margemMin}){
+  const soma = somaPercentuais(taxes, desp, comissao);
+  const divisor = 1 - soma - num(margemMin)/100;
+  if(divisor<=0) return 0;
+  const precoMin = custo/divisor;
+  const desc = 1 - precoMin/precoLista;
+  return Math.max(0, desc*100);
+}
+
+/* ---------- classificação de margem ---------- */
+function margemStatus(m){
+  if(m>=35) return {cor:'green', txt:'Margem Ideal', hex:'var(--green)', bg:'var(--green-bg)'};
+  if(m>=30) return {cor:'amber', txt:'Atenção', hex:'var(--amber)', bg:'var(--amber-bg)'};
+  return {cor:'red', txt:'Margem Insuficiente', hex:'var(--red)', bg:'var(--red-bg)'};
+}
+
+/* ---------- Gauge SVG (velocímetro) ---------- */
+function gaugeSVG(value, size=200){
+  const v = Math.max(0, Math.min(60, value));
+  const start=-120, end=120, range=end-start;
+  const angle = start + (v/60)*range;
+  const r=80, cx=100, cy=100;
+  const pol=(deg)=>{const a=(deg-90)*Math.PI/180;return[cx+r*Math.cos(a),cy+r*Math.sin(a)];};
+  const arc=(a1,a2,color,w)=>{const[x1,y1]=pol(a1),[x2,y2]=pol(a2);const large=(a2-a1)>180?1:0;
+    return `<path d="M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2}" fill="none" stroke="${color}" stroke-width="${w}" stroke-linecap="round"/>`;};
+  const a30 = start + (30/60)*range, a35 = start + (35/60)*range;
+  const[nx,ny]=pol(angle);
+  const st = margemStatus(value);
+  return `<svg viewBox="0 0 200 130" width="${size}" style="max-width:100%">
+    ${arc(start, a30, 'var(--red)', 13)}
+    ${arc(a30, a35, 'var(--amber)', 13)}
+    ${arc(a35, end, 'var(--green)', 13)}
+    <line x1="${cx}" y1="${cy}" x2="${nx}" y2="${ny}" stroke="${st.hex}" stroke-width="4" stroke-linecap="round"/>
+    <circle cx="${cx}" cy="${cy}" r="7" fill="${st.hex}"/>
+    <text x="${pol(start)[0]-4}" y="118" font-size="9" fill="var(--muted)">0%</text>
+    <text x="95" y="128" font-size="9" fill="var(--muted)">30·35</text>
+    <text x="${pol(end)[0]-10}" y="118" font-size="9" fill="var(--muted)">60%</text>
+  </svg>`;
+}
+
+/* ============================================================
+   ROTEAMENTO / VIEWS
+   ============================================================ */
+let SESSION = null;
+const VIEW_META = {
+  dashboard:['Dashboard','Indicadores financeiros e últimos cálculos'],
+  calc:['Precificação','Todas as variações · informe o custo e veja o preço sugerido'],
+  simulador:['Simulador','Ajuste parâmetros e veja o impacto instantâneo'],
+  produtos:['Produtos','Cadastro de sofás e colchões e suas variações'],
+  materiaprima:['Matéria-Prima','Cadastro de insumos · importação via Excel/CSV'],
+  engenharia:['Engenharia','Ficha técnica por blocos · impressão por folha'],
+  impostos:['Impostos & Despesas','Parâmetros fiscais e despesas variáveis (Lucro Real)'],
+  relatorios:['Relatórios','Análises e exportação (Excel · PDF · CSV)'],
+  config:['Configurações','Usuários, empresa, metas e histórico']
+};
+let currentView='dashboard';
+const el = id => document.getElementById(id);
+
+function toggleMenu(){ const s=document.querySelector('.sidebar'), o=el('menuOverlay'); const open=s.classList.toggle('open'); o.classList.toggle('show', open); }
+function closeMenu(){ document.querySelector('.sidebar').classList.remove('open'); el('menuOverlay').classList.remove('show'); }
+function nav(v){
+  if(SESSION && !menuAllowed(v)){ v=firstAllowedView(); if(!v) return; }
+  currentView=v;
+  closeMenu();
+  document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active', b.dataset.view===v));
+  el('viewTitle').textContent=VIEW_META[v][0];
+  el('viewSub').textContent=VIEW_META[v][1];
+  render();
+}
+function render(){
+  const c = el('content');
+  if(!SESSION){return;}
+  c.innerHTML = ({dashboard:viewDashboard, calc:viewCalc, simulador:viewSimulador,
+    produtos:viewProdutos, materiaprima:viewMateriaPrima, engenharia:viewEngenharia, impostos:viewImpostos, relatorios:viewRelatorios, config:viewConfig}[currentView])();
+  if(currentView==='calc') initCalc();
+  if(currentView==='simulador') initSim();
+}
+
+/* ---------- helpers de produto ---------- */
+function todasVariacoes(){
+  const arr=[];
+  DB.produtos.forEach(p=>p.variacoes.forEach(v=>arr.push({...v, produto:p})));
+  return arr;
+}
+function calcVar(v, over={}){
+  return precificar({
+    custo:v.custoTotal, taxes:over.taxes||DB.taxes, desp:over.desp||DB.desp,
+    comissao:over.comissao??DB.comissao, margem:over.margem??DB.margemAlvo
+  });
+}
+
+/* ============================================================
+   DASHBOARD
+   ============================================================ */
+function viewDashboard(){
+  const vars = todasVariacoes();
+  const res = vars.map(v=>({v, r:calcVar(v)}));
+  const n = res.length;
+  const precoMedio = n? res.reduce((a,b)=>a+b.r.preco,0)/n : 0;
+  const margemMedia = n? res.reduce((a,b)=>a+b.r.mcPct,0)/n : 0;
+  const abaixo = res.filter(x=>x.r.mcPct<30).length;
+  const acima = res.filter(x=>x.r.mcPct>=35).length;
+  const ranked = [...res].sort((a,b)=>b.r.mc-a.r.mc);
+  const top = ranked.slice(0,5);
+  const bottom = ranked.slice(-5).reverse();
+
+  const famStats = {};
+  res.forEach(x=>{const f=x.v.produto.familia; (famStats[f]??={n:0,soma:0,mc:0}); famStats[f].n++; famStats[f].soma+=x.r.preco; famStats[f].mc+=x.r.mcPct;});
+
+  return `
+  <div class="grid g-4" style="margin-bottom:18px">
+    ${kpi('Variações precificadas', n, 'Sofás + Colchões', '▤')}
+    ${kpi('Preço médio de venda', money(precoMedio), 'Base margem-alvo '+DB.margemAlvo+'%', '₿')}
+    ${kpiMargem('Margem média (MC)', margemMedia)}
+    ${kpi('Abaixo de 30%', abaixo, acima+' acima de 35%', '⚠', abaixo>0?'var(--red)':'var(--green)')}
+  </div>
+
+  <div class="grid g-2" style="margin-bottom:18px">
+    <div class="card"><div class="hd"><div><h3>Produtos mais lucrativos</h3><div class="desc">Maior margem de contribuição em R$</div></div></div>
+      <div class="bd" style="padding:6px 0">${miniTable(top,'green')}</div></div>
+    <div class="card"><div class="hd"><div><h3>Menos rentáveis</h3><div class="desc">Menor margem de contribuição</div></div></div>
+      <div class="bd" style="padding:6px 0">${miniTable(bottom,'red')}</div></div>
+  </div>
+
+  <div class="grid g-2" style="margin-bottom:18px">
+    <div class="card"><div class="hd"><h3>Desempenho por família</h3></div><div class="bd">
+      ${Object.entries(famStats).map(([f,s])=>{
+        const mm=s.mc/s.n; const st=margemStatus(mm);
+        return `<div style="margin-bottom:14px">
+          <div class="row" style="justify-content:space-between;margin-bottom:6px">
+            <b>${f}</b><span class="tag ${st.cor}">${pct(mm)}</span></div>
+          <div class="bar-track"><div class="bar-fill" style="width:${Math.min(100,mm/60*100)}%;background:${st.hex}"></div></div>
+          <div class="hint">${s.n} variações · ticket médio ${money(s.soma/s.n)}</div>
+        </div>`;}).join('')}
+    </div></div>
+    <div class="card"><div class="hd"><h3>Distribuição de margem</h3></div><div class="bd">
+      ${barChart([['≥35% Ideal',acima,'var(--green)'],['30–35% Atenção',res.filter(x=>x.r.mcPct>=30&&x.r.mcPct<35).length,'var(--amber)'],['<30% Insuf.',abaixo,'var(--red)']], n)}
+      <div class="legend"><span><span class="dot" style="background:var(--green)"></span>Ideal</span><span><span class="dot" style="background:var(--amber)"></span>Atenção</span><span><span class="dot" style="background:var(--red)"></span>Insuficiente</span></div>
+    </div></div>
+  </div>
+
+  <div class="card"><div class="hd"><div><h3>Últimos cálculos & alterações</h3></div>
+    <button class="btn sm" onclick="nav('relatorios')">Ver relatórios</button></div>
+    <div class="bd" style="padding:0"><table><thead><tr><th>Evento</th><th>Usuário</th><th>Campo</th><th>De → Para</th><th>Data</th></tr></thead>
+    <tbody>${DB.historico.slice(-8).reverse().map(h=>`<tr><td>${h.acao}</td><td>${h.user}</td><td class="muted">${h.campo}</td>
+      <td class="muted">${h.ant} → <b>${h.novo}</b></td><td class="muted">${new Date(h.data).toLocaleString('pt-BR')}</td></tr>`).join('')||'<tr><td colspan=5 class=muted style=padding:16px>Sem registros.</td></tr>'}</tbody></table></div></div>
+  `;
+}
+function kpi(lbl,val,delta,ico,color){return `<div class="card kpi"><div class="lbl"><span>${ico||'•'}</span>${lbl}</div>
+  <div class="val" ${color?`style="color:${color}"`:''}>${val}</div><div class="delta">${delta||''}</div></div>`;}
+function kpiMargem(lbl,m){const st=margemStatus(m);return `<div class="card kpi"><div class="lbl"><span>◐</span>${lbl}</div>
+  <div class="val" style="color:${st.hex}">${pct(m)}</div><div class="delta"><span class="tag ${st.cor}">${st.txt}</span></div></div>`;}
+function miniTable(rows,cor){
+  return `<table><tbody>${rows.map(x=>`<tr><td><b>${x.v.produto.modelo}</b><br><span class="muted" style="font-size:11.5px">${x.v.rotulo}</span></td>
+    <td style="text-align:right">${money(x.r.preco)}<br><span class="tag ${margemStatus(x.r.mcPct).cor}" style="font-size:10px">${pct(x.r.mcPct)}</span></td>
+    <td style="text-align:right;color:${cor==='green'?'var(--green)':'var(--red)'};font-weight:700">${money(x.r.mc)}</td></tr>`).join('')}</tbody></table>`;
+}
+function barChart(data,total){
+  const max=Math.max(...data.map(d=>d[1]),1);
+  return `<div style="display:flex;align-items:flex-end;gap:20px;height:150px;padding:10px 6px">
+    ${data.map(([lbl,val,col])=>`<div style="flex:1;text-align:center;display:flex;flex-direction:column;justify-content:flex-end;height:100%">
+      <div style="font-weight:800;font-size:18px">${val}</div>
+      <div style="background:${col};border-radius:8px 8px 0 0;height:${val/max*100}%;min-height:4px;margin-top:6px"></div>
+      <div class="hint" style="margin-top:8px">${lbl}</div></div>`).join('')}</div>`;
+}
+
+/* ============================================================
+   PRECIFICAÇÃO — todas as variações + custo editável + preço sugerido
+   ============================================================ */
+function viewCalc(){
+  const editavel = can('calcular');
+  const somaImp = Object.values(DB.taxes).reduce((a,b)=>a+b,0);
+  const somaDesp = Object.values(DB.desp).reduce((a,b)=>a+b,0);
+  return `
+  <div class="card" style="margin-bottom:18px"><div class="bd">
+    <div class="row" style="justify-content:space-between;align-items:flex-end;gap:20px;flex-wrap:wrap">
+      <div class="field" style="margin:0;min-width:230px;flex:1">
+        <label>Margem de contribuição alvo: <b id="calMargemLbl">${pct(DB.margemAlvo)}</b></label>
+        <input type="range" class="slider" id="calMargem" min="0" max="60" step="0.5" value="${DB.margemAlvo}" oninput="el('calMargemLbl').textContent=this.value+'%';calcRerender()">
+      </div>
+      <div class="field" style="margin:0;width:120px"><label>Comissão</label><div class="inp-group"><input class="inp" id="calCom" value="${DB.comissao}" oninput="calcRerender()"><span class="suffix">%</span></div></div>
+      <div class="field" style="margin:0;min-width:210px"><label>Produto</label>
+        <select class="inp" id="calProd" onchange="calcRerender()">
+          <option value="__all">Todos os produtos</option>
+          ${DB.produtos.map(p=>`<option value="${p.id}">${p.modelo} (${p.familia})</option>`).join('')}
+        </select></div>
+    </div>
+    <div class="hint" style="margin-top:12px">Preencha o <b>custo de matéria-prima / industrial</b> e veja o <b>preço sugerido</b> pela margem-alvo. Você também pode <b>digitar o preço de venda</b> em cada variação — o sistema informa a <b>margem de contribuição resultante</b> desse preço. Impostos: <b>${pct(somaImp)}</b> · despesas variáveis: <b>${pct(somaDesp)}</b>. <a onclick="nav('impostos')" style="color:var(--primary);cursor:pointer">ajustar impostos/despesas</a></div>
+  </div></div>
+  <div class="row" style="justify-content:space-between;margin-bottom:14px;align-items:center">
+    <div class="row" style="gap:12px">
+      <div class="sub-tabs" style="margin:0" id="calModeBtns">
+        <button data-m="matriz" class="${calcMode==='matriz'?'active':''}" onclick="setCalcMode('matriz')">▦ Matriz</button>
+        <button data-m="lista" class="${calcMode==='lista'?'active':''}" onclick="setCalcMode('lista')">☰ Lista detalhada</button>
+      </div>
+      <input class="inp" style="max-width:300px" id="calBusca" placeholder="🔎 Filtrar..." oninput="calFilter()">
+    </div>
+    <div class="legend" style="margin:0"><span><span class="dot" style="background:var(--green)"></span>≥35%</span>
+      <span><span class="dot" style="background:var(--amber)"></span>30–35%</span>
+      <span><span class="dot" style="background:var(--red)"></span>&lt;30%</span></div>
+  </div>
+  ${editavel?'':'<div class="card" style="margin-bottom:14px"><div class="bd muted">🔒 Perfil somente-consulta: custos não editáveis.</div></div>'}
+  <div id="calTabela"></div>`;
+}
+let calcMode='matriz';
+function setCalcMode(m){ calcMode=m;
+  document.querySelectorAll('#calModeBtns button').forEach(b=>b.classList.toggle('active',b.dataset.m===m));
+  calcRerender(); }
+function initCalc(){ calcRerender(); }
+function findVar(vid){ for(const p of DB.produtos){ const v=p.variacoes.find(x=>x.id===vid); if(v) return {p,v}; } return {}; }
+function computeRow(v){
+  const base={custo:num(v.custoTotal), taxes:DB.taxes, desp:DB.desp, comissao:num(el('calCom').value)};
+  const sugestao=precificar({...base, margem:num(el('calMargem').value)});
+  const manual=num(v.precoManual);
+  const usouManual = manual>0;
+  const efetivo = usouManual ? margemDoPreco(manual, base) : sugestao;
+  return {sugestao, efetivo, usouManual};
+}
+function renderRowCells(v){
+  const {sugestao, efetivo, usouManual}=computeRow(v);
+  const stSug=margemStatus(sugestao.mcPct), stEf=margemStatus(efetivo.mcPct);
+  el('imp_'+v.id).textContent=money(efetivo.impostosTotal);
+  el('cd_'+v.id).textContent=money(efetivo.comissaoRs+efetivo.despesasTotal);
+  el('pv_'+v.id).innerHTML=money(sugestao.preco);
+  // MC R$: mostra os dois valores em tempo real
+  el('mc_'+v.id).innerHTML = usouManual
+    ? `<div style="color:${stSug.hex}"><span class="hint">sugerido</span> ${money(sugestao.mc)}</div>
+       <div style="color:${stEf.hex};font-weight:700"><span class="hint">praticado</span> ${money(efetivo.mc)}</div>`
+    : `<div style="color:${stSug.hex};font-weight:700">${money(sugestao.mc)}</div>`;
+  // Margem: dois selos simultâneos (sugerido x praticado)
+  el('mg_'+v.id).innerHTML = usouManual
+    ? `<div style="display:flex;flex-direction:column;align-items:flex-start;gap:3px">
+         <span class="tag ${stSug.cor}" style="white-space:nowrap"><span style="opacity:.7">sug.</span> ${pct(sugestao.mcPct)}</span>
+         <span class="tag ${stEf.cor}" style="white-space:nowrap"><span style="opacity:.7">prat.</span> ${pct(efetivo.mcPct)}</span></div>`
+    : `<span class="tag ${stSug.cor}" style="white-space:nowrap">${pct(sugestao.mcPct)}</span>`;
+  const pmEl=el('pm_'+v.id); if(pmEl){ pmEl.style.borderColor = usouManual? stEf.hex : 'var(--border)'; }
+  const det=el('det_'+v.id); if(det && !det.classList.contains('hidden')) renderDet(v);
+}
+function toggleDet(vid){
+  const det=el('det_'+vid), tg=el('tg_'+vid); if(!det) return;
+  det.classList.toggle('hidden');
+  const aberto=!det.classList.contains('hidden');
+  if(tg) tg.textContent = aberto?'▾':'▸';
+  if(aberto){ const {v}=findVar(vid); if(v) renderDet(v); }
+}
+function renderDet(v){
+  const box=el('detbox_'+v.id); if(!box) return;
+  const {sugestao, efetivo, usouManual}=computeRow(v);
+  const r=efetivo;
+  const TL={icms:'ICMS',pis:'PIS',cofins:'COFINS',ipi:'IPI',irpj:'IRPJ',csll:'CSLL',iss:'ISS',outros:'Outros impostos'};
+  const DL={freteVenda:'Frete de venda',marketplace:'Marketplace',bonificacoes:'Bonificações',descontos:'Descontos comerciais',marketing:'Marketing',outras:'Outras despesas'};
+  const TX={icms:DB.taxes.icms,pis:DB.taxes.pis,cofins:DB.taxes.cofins,ipi:DB.taxes.ipi,irpj:DB.taxes.irpj,csll:DB.taxes.csll,iss:DB.taxes.iss,outros:DB.taxes.outros};
+  const DX=DB.desp;
+  const col=(titulo, itens, total)=>`<div class="card" style="background:var(--surface-2)"><div class="bd" style="padding:12px 14px">
+    <div class="row" style="justify-content:space-between;margin-bottom:6px"><b>${titulo}</b><b>${money(total)}</b></div>
+    ${itens.map(([l,p,val])=>`<div class="brk"><span class="k">${l} <span style="opacity:.6">${pct(p)}</span></span><span class="v">${money(val)}</span></div>`).join('')}
+  </div></div>`;
+  const impItens=Object.keys(TL).map(k=>[TL[k],TX[k],r.impostos[k]]);
+  const despItens=Object.keys(DL).map(k=>[DL[k],DX[k],r.despesas[k]]);
+  box.innerHTML=`<div style="padding:14px 16px">
+    <div class="hint" style="margin-bottom:10px">Composição sobre o preço ${usouManual?'praticado':'sugerido'} de <b>${money(r.preco)}</b> · custo ${money(r.custo)}</div>
+    <div class="grid g-3">
+      ${col('Impostos', impItens, r.impostosTotal)}
+      ${col('Comissão', [['Comissão',num(el('calCom').value),r.comissaoRs]], r.comissaoRs)}
+      ${col('Despesas variáveis', despItens, r.despesasTotal)}
+    </div>
+    <div class="brk total" style="margin-top:12px"><span class="k">Margem de contribuição</span><span class="v">${money(r.mc)} · ${pct(r.mcPct)}</span></div>
+  </div>`;
+}
+function onCustoEdit(inpEl){
+  const {v}=findVar(inpEl.dataset.vid); if(!v) return;
+  v.custoTotal=num(inpEl.value); save(); renderRowCells(v);
+}
+function onPrecoEdit(inpEl){
+  const {v}=findVar(inpEl.dataset.vid); if(!v) return;
+  v.precoManual = inpEl.value.trim()===''? 0 : num(inpEl.value);
+  save(); renderRowCells(v);
+}
+function usarSugerido(vid){
+  const {v}=findVar(vid); if(!v) return;
+  v.precoManual=0; save();
+  const inp=document.querySelector(`input[data-pm="${vid}"]`); if(inp) inp.value='';
+  renderRowCells(v);
+}
+function calcRerender(){
+  const editavel = can('calcular');
+  const sel=el('calProd').value;
+  const prods = sel==='__all'?DB.produtos:DB.produtos.filter(p=>p.id===sel);
+  if(!prods.some(p=>p.variacoes.length)){ el('calTabela').innerHTML=semProdutos(); return; }
+  if(calcMode==='matriz') renderMatriz(prods, editavel);
+  else renderLista(prods, editavel);
+}
+
+/* ----- MODO MATRIZ: tamanho (linha) × tecido (coluna) ----- */
+function renderMatriz(prods, editavel){
+  el('calTabela').innerHTML=prods.map(p=>{
+    const tamanhos=[...new Set(p.variacoes.map(v=>v.tamanho))];
+    const tecidos=[...new Set(p.variacoes.map(v=>v.tecido).filter(t=>t&&t!=='—'))];
+    let inner;
+    if(tecidos.length){
+      const head=`<tr><th style="min-width:90px">Tamanho</th>${tecidos.map(t=>`<th style="text-align:center;min-width:150px">Tecido ${t}</th>`).join('')}</tr>`;
+      const body=tamanhos.map(tz=>`<tr class="crow" data-s="${(p.modelo+' '+tz).toLowerCase()}"><td><b>${tz}</b></td>${
+        tecidos.map(tc=>{ const v=p.variacoes.find(x=>x.tamanho===tz&&x.tecido===tc);
+          return v?`<td>${matrixCell(v,editavel)}</td>`:'<td class="muted" style="text-align:center">—</td>'; }).join('')
+      }</tr>`).join('');
+      inner=`<table>${head}${body}</table>`;
+    } else {
+      // sem classes de tecido (ex.: colchões) — coluna única de custo
+      const body=p.variacoes.map(v=>`<tr class="crow" data-s="${(p.modelo+' '+v.rotulo).toLowerCase()}">
+        <td><b>${v.tamanho}</b></td><td class="muted">${v.medida||'—'}</td><td style="min-width:180px">${matrixCell(v,editavel)}</td></tr>`).join('');
+      inner=`<table><tr><th>Medida</th><th>Dimensões</th><th>Custo · preço · margem</th></tr>${body}</table>`;
+    }
+    return `<div class="card" style="margin-bottom:18px"><div class="hd"><div><h3>${p.modelo} <span class="tag blue">${p.familia}</span></h3>
+      <div class="desc">SKU ${p.codigo} · digite o custo em cada célula — preço sugerido e margem aparecem abaixo</div></div></div>
+      <div class="bd" style="padding:0;overflow:auto">${inner}</div></div>`;
+  }).join('');
+  prods.forEach(p=>p.variacoes.forEach(v=>renderMatrixCell(v)));
+}
+function matrixCell(v, editavel){
+  const temCusto=num(v.custoTotal)>0;
+  const {sugestao,usouManual}=computeRow(v);
+  const precoVal = temCusto ? (usouManual?num(v.precoManual):sugestao.preco).toFixed(2) : '';
+  return `
+    <div class="hint" style="text-align:left;margin-bottom:2px">Custo</div>
+    <div class="inp-group"><input class="inp" style="padding-left:26px" data-vid="${v.id}" value="${temCusto?num(v.custoTotal).toFixed(2):''}" placeholder="0,00" oninput="onCustoEditM(this)" ${editavel?'':'disabled'}><span class="suffix" style="left:9px;right:auto">R$</span></div>
+    <div class="hint" style="text-align:left;margin:6px 0 2px">Preço sugerido <span class="muted">(editável)</span></div>
+    <div class="inp-group"><input class="inp" id="pm_${v.id}" style="padding-left:26px;font-weight:700" data-vid="${v.id}" value="${precoVal}" placeholder="—" oninput="onPrecoEditM(this)" ${editavel&&temCusto?'':'disabled'}><span class="suffix" style="left:9px;right:auto">R$</span></div>
+    <div id="mx_${v.id}" class="hint" style="margin-top:4px;text-align:center"></div>`;
+}
+function renderMatrixCell(v){
+  const box=el('mx_'+v.id); if(!box) return;
+  const pm=el('pm_'+v.id);
+  if(num(v.custoTotal)<=0){ box.innerHTML='<span class="muted">informe o custo</span>'; if(pm&&document.activeElement!==pm) pm.value=''; return; }
+  const {sugestao,efetivo,usouManual}=computeRow(v);
+  const st=margemStatus(efetivo.mcPct);
+  // se o preço não foi alterado manualmente, o campo acompanha o sugerido
+  if(pm && !usouManual && document.activeElement!==pm) pm.value=sugestao.preco.toFixed(2);
+  if(pm) pm.style.borderColor = usouManual? st.hex : 'var(--border)';
+  box.innerHTML=`margem <b style="color:${st.hex}">${pct(efetivo.mcPct)}</b>`
+    + (usouManual?` · <span style="cursor:pointer;color:var(--primary)" onclick="usarSugeridoM('${v.id}')">↺ sugerido</span>`:'');
+}
+function onCustoEditM(inpEl){
+  const {v}=findVar(inpEl.dataset.vid); if(!v) return;
+  v.custoTotal=num(inpEl.value); save(); renderMatrixCell(v);
+}
+function onPrecoEditM(inpEl){
+  const {v}=findVar(inpEl.dataset.vid); if(!v) return;
+  v.precoManual = inpEl.value.trim()===''?0:num(inpEl.value);
+  save(); renderMatrixCell(v);
+}
+function usarSugeridoM(vid){
+  const {v}=findVar(vid); if(!v) return;
+  v.precoManual=0; save(); renderMatrixCell(v);
+}
+
+/* ----- MODO LISTA: detalhado com preço de venda manual e as duas margens ----- */
+function renderLista(prods, editavel){
+  el('calTabela').innerHTML=prods.map(p=>{
+    const rows=p.variacoes.map(v=>`<tr class="crow" data-s="${(p.modelo+' '+v.rotulo+' '+v.tamanho+' '+(v.tecido||'')+' '+(v.medida||'')).toLowerCase()}">
+      <td><button class="btn sm" style="padding:2px 8px;margin-right:6px" id="tg_${v.id}" onclick="toggleDet('${v.id}')" title="Abrir impostos, comissão e despesas">▸</button><b>${v.rotulo}</b></td>
+      <td class="muted">${v.tamanho}</td>
+      <td class="muted">${v.tecido||v.medida||'—'}</td>
+      <td style="width:140px"><div class="inp-group"><input class="inp" style="padding-left:28px" data-vid="${v.id}" value="${num(v.custoTotal).toFixed(2)}" oninput="onCustoEdit(this)" ${editavel?'':'disabled'}><span class="suffix" style="left:11px;right:auto">R$</span></div></td>
+      <td id="imp_${v.id}" class="muted"></td>
+      <td id="cd_${v.id}" class="muted"></td>
+      <td id="pv_${v.id}" class="muted" style="white-space:nowrap"></td>
+      <td style="width:150px"><div class="inp-group"><input class="inp" id="pm_${v.id}" data-vid="${v.id}" data-pm="${v.id}" style="padding-left:28px;font-weight:700" value="${num(v.precoManual)>0?num(v.precoManual).toFixed(2):''}" placeholder="usar sugerido" oninput="onPrecoEdit(this)" ${editavel?'':'disabled'}><span class="suffix" style="left:11px;right:auto">R$</span></div>
+        ${editavel?`<div class="hint" style="margin-top:3px;cursor:pointer;color:var(--primary)" onclick="usarSugerido('${v.id}')">↺ usar sugerido</div>`:''}</td>
+      <td id="mc_${v.id}" class="muted"></td>
+      <td id="mg_${v.id}"></td></tr>
+      <tr id="det_${v.id}" class="hidden"><td colspan="10" style="padding:0;background:var(--surface-2)"><div id="detbox_${v.id}"></div></td></tr>`).join('');
+    return `<div class="card" style="margin-bottom:18px"><div class="hd"><div><h3>${p.modelo} <span class="tag blue">${p.familia}</span></h3>
+      <div class="desc">SKU ${p.codigo} · ${p.categoria} · ${p.variacoes.length} variações · clique em ▸ para abrir impostos, comissão e despesas</div></div></div>
+      <div class="bd" style="padding:0;overflow:auto"><table><thead><tr>
+        <th>Variação</th><th>Tamanho</th><th>Tecido/Medida</th><th>Custo MP / industrial</th>
+        <th>Impostos R$</th><th>Comissão+Desp.</th><th>Preço sugerido</th><th>Preço de venda</th><th>MC R$</th><th>Margem</th>
+      </tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  }).join('');
+  prods.forEach(p=>p.variacoes.forEach(v=>renderRowCells(v)));
+}
+function calFilter(){ const q=el('calBusca').value.toLowerCase();
+  document.querySelectorAll('.crow').forEach(r=>r.style.display=r.dataset.s.includes(q)?'':'none'); }
+function breakdownHTML(r){
+  const TL={icms:'ICMS',pis:'PIS',cofins:'COFINS',ipi:'IPI',irpj:'IRPJ',csll:'CSLL',iss:'ISS',outros:'Outros imp.'};
+  const DL={freteVenda:'Frete venda',marketplace:'Marketplace',bonificacoes:'Bonificações',descontos:'Descontos com.',marketing:'Marketing',outras:'Outras desp.'};
+  const line=(k,v,sub)=>`<div class="brk"><span class="k">${k}${sub?` <span style="opacity:.6">${sub}</span>`:''}</span><span class="v">${money(v)}</span></div>`;
+  let h=line('Custo industrial total', r.custo);
+  h+=`<div class="brk" style="border:none;padding-bottom:2px"><span class="k" style="font-weight:700;color:var(--text)">Impostos</span><span class="v">${money(r.impostosTotal)}</span></div>`;
+  for(const k in r.impostos) if(r.impostos[k]>0) h+=line('&nbsp;&nbsp;'+TL[k], r.impostos[k]);
+  h+=line('Comissão', r.comissaoRs);
+  h+=`<div class="brk" style="border:none;padding-bottom:2px"><span class="k" style="font-weight:700;color:var(--text)">Despesas variáveis</span><span class="v">${money(r.despesasTotal)}</span></div>`;
+  for(const k in r.despesas) if(r.despesas[k]>0) h+=line('&nbsp;&nbsp;'+DL[k], r.despesas[k]);
+  h+=`<div class="brk"><span class="k" style="color:var(--green);font-weight:700">Margem de contribuição</span><span class="v" style="color:var(--green)">${money(r.mc)} · ${pct(r.mcPct)}</span></div>`;
+  h+=`<div class="brk total"><span class="k">Preço final de venda</span><span class="v">${money(r.preco)}</span></div>`;
+  return h;
+}
+/* ============================================================
+   SIMULADOR
+   ============================================================ */
+function semProdutos(msg){return `<div class="card"><div class="bd" style="text-align:center;padding:50px">
+  <div style="font-size:40px">📦</div><h3 style="margin:10px 0">Nenhum produto cadastrado</h3>
+  <p class="muted">${msg||'Cadastre produtos e informe os custos para começar a precificar.'}</p></div></div>`;}
+function viewSimulador(){
+  if(!DB.produtos.some(p=>p.variacoes.length)) return semProdutos('Cadastre um produto para usar o simulador.');
+  const opts = DB.produtos.map(p=>p.variacoes.map(v=>`<option value="${p.id}:${v.id}">${p.modelo} · ${v.rotulo}</option>`).join('')).join('');
+  return `
+  <div class="grid" style="grid-template-columns:1fr 1fr;gap:18px">
+    <div class="card"><div class="hd"><div><h3>Simulação instantânea</h3><div class="desc">Mova os controles e veja o resultado em tempo real</div></div></div>
+      <div class="bd">
+        <div class="field"><label>Produto base</label><select class="inp" id="sSel" onchange="simFromProduct()">${opts}</select></div>
+        ${slider('sMargem','Margem alvo (lucro)',DB.margemAlvo,0,60,'%')}
+        ${slider('sComissao','Comissão',DB.comissao,0,15,'%')}
+        ${slider('sIcms','ICMS',DB.taxes.icms,0,25,'%')}
+        ${slider('sFrete','Frete de venda',DB.desp.freteVenda,0,15,'%')}
+        ${slider('sDesc','Desconto aplicado',0,0,40,'%')}
+        <div class="field" style="margin-top:8px"><label>Ou defina o preço manualmente (R$) — calcula a margem resultante</label>
+          <div class="inp-group"><input class="inp" id="sPreco" placeholder="deixe vazio p/ usar margem alvo" oninput="simRun()"><span class="suffix">R$</span></div></div>
+      </div></div>
+
+    <div>
+      <div class="card" style="margin-bottom:18px"><div class="bd gauge-wrap">
+        <div id="sGauge"></div><div class="gauge-label" id="sMcPct"></div>
+        <div class="muted" style="font-size:12px">Margem resultante</div><div id="sStatus"></div>
+      </div></div>
+      <div class="card"><div class="hd"><h3>Resultado</h3></div><div class="bd" id="sBreak"></div></div>
+      <div class="card" style="margin-top:18px"><div class="bd">
+        <div class="row" style="justify-content:space-between"><b>🛡️ Desconto máximo permitido</b><span class="tag blue" id="sDescMax"></span></div>
+        <div class="hint">Maior desconto sobre o preço de lista mantendo a margem mínima de ${DB.margemMin}% (MC).</div>
+      </div></div>
+    </div>
+  </div>`;
+}
+function slider(id,label,val,min,max,suf){return `<div class="field">
+  <label>${label}: <b id="${id}Lbl">${val}${suf}</b></label>
+  <input type="range" class="slider" id="${id}" min="${min}" max="${max}" step="0.1" value="${val}" oninput="el('${id}Lbl').textContent=this.value+'${suf}';simRun()"></div>`;}
+function initSim(){ if(el('sSel')) simFromProduct(); }
+function simFromProduct(){ el('sPreco').value=''; simRun(); }
+function simRun(){
+  const [pid,vid]=el('sSel').value.split(':');
+  const p=DB.produtos.find(x=>x.id===pid);const v=p.variacoes.find(x=>x.id===vid);
+  const taxes={...DB.taxes, icms:num(el('sIcms').value)};
+  const desp={...DB.desp, freteVenda:num(el('sFrete').value), descontos:num(el('sDesc').value)};
+  const comissao=num(el('sComissao').value);
+  let r;
+  const precoManual=el('sPreco').value.trim();
+  if(precoManual!==''){ r=margemDoPreco(num(precoManual),{custo:v.custoTotal,taxes,desp,comissao}); }
+  else { r=precificar({custo:v.custoTotal,taxes,desp,comissao,margem:num(el('sMargem').value)}); }
+  el('sGauge').innerHTML=gaugeSVG(r.mcPct);
+  el('sMcPct').textContent=pct(r.mcPct);
+  const st=margemStatus(r.mcPct);el('sMcPct').style.color=st.hex;
+  el('sStatus').innerHTML=`<div class="status-pill" style="background:${st.bg};color:${st.hex}">● ${st.txt}</div>`;
+  el('sBreak').innerHTML=breakdownHTML(r);
+  const dm=descontoMaximo({custo:v.custoTotal,taxes,desp,comissao,precoLista:r.preco,margemMin:DB.margemMin});
+  el('sDescMax').textContent=pct(dm);
+}
+
+/* ============================================================
+   MATÉRIA-PRIMA — cadastro + importação Excel/CSV
+   ============================================================ */
+let mpEdit=null;
+function viewMateriaPrima(){
+  const editavel = can('editar');
+  const lista=DB.materiais;
+  return `
+  ${editavel?`<div class="card" style="margin-bottom:18px"><div class="hd"><div><h3 id="mpFormTitle">Nova matéria-prima</h3><div class="desc">Preencha e clique em salvar</div></div>
+    <div class="row"><button class="btn sm" onclick="baixarModeloMP()">⬇ Baixar modelo</button>
+      <input type="file" id="mpFile" accept=".xlsx,.xls,.csv" style="display:none" onchange="onImportMP(this)">
+      <button class="btn sm" onclick="el('mpFile').click()">⬆ Importar Excel/CSV</button></div></div>
+    <div class="bd">
+      <div class="grid g-3">
+        <div class="field"><label>Código</label><input class="inp" id="mpCod" placeholder="ex.: MP-0001"></div>
+        <div class="field" style="grid-column:span 2"><label>Descrição</label><input class="inp" id="mpDesc" placeholder="ex.: Espuma D28 densidade média"></div>
+      </div>
+      <div class="grid g-3">
+        <div class="field"><label>Unidade</label><input class="inp" id="mpUn" list="mpUnList" placeholder="ex.: UN, MT, KG, M², PC"><datalist id="mpUnList"><option>UN</option><option>MT</option><option>M²</option><option>KG</option><option>PC</option><option>LT</option><option>RL</option><option>CX</option></datalist></div>
+        <div class="field"><label>Preço custo nota fiscal</label><div class="inp-group"><input class="inp" id="mpPnf" style="padding-left:28px" placeholder="0,00"><span class="suffix" style="left:11px;right:auto">R$</span></div></div>
+        <div class="field"><label>Preço alternativo</label><div class="inp-group"><input class="inp" id="mpPalt" style="padding-left:28px" placeholder="0,00"><span class="suffix" style="left:11px;right:auto">R$</span></div></div>
+      </div>
+      <div class="field" style="margin-top:2px"><label class="row" style="gap:8px;cursor:pointer;color:var(--text);font-size:13px"><input type="checkbox" id="mpConv" onchange="el('mpConvBox').style.display=this.checked?'':'none'"> <b>Ativar conversão de unidade</b> (item específico)</label>
+        <div class="hint">Para insumos comprados numa unidade e consumidos em outra (ex.: chapa → m², rolo → metro). O custo na Engenharia usa o preço já convertido.</div></div>
+      <div id="mpConvBox" style="display:none"><div class="grid g-3">
+        <div class="field"><label>Unidade de consumo</label><input class="inp" id="mpUnCons" list="mpUnList" placeholder="ex.: M², MT"></div>
+        <div class="field"><label>Fator (1 unid. compra = ? consumo)</label><input class="inp" id="mpFator" placeholder="ex.: 10"></div>
+        <div class="field"><label>&nbsp;</label><div class="hint" style="padding-top:9px">Preço por unid. de consumo = Preço NF ÷ Fator</div></div>
+      </div></div>
+      <div class="row" style="margin-top:6px">
+        <button class="btn primary sm" onclick="salvarMateria()">💾 Salvar</button>
+        <button class="btn sm" onclick="mpEdit=null;render()">Limpar</button>
+        <span class="hint">Importação: colunas na ordem <b>código · descrição · unidade · preço nota · preço alternativo</b>. Para .xlsx é necessário internet; sem internet, use CSV.</span>
+      </div>
+    </div></div>`:''}
+  <div class="card"><div class="hd"><div><h3>Matérias-primas cadastradas</h3><div class="desc">${lista.length} itens</div></div>
+    <input class="inp" style="max-width:280px" id="mpBusca" placeholder="🔎 Buscar código ou descrição..." oninput="mpFilter()"></div>
+    <div class="bd" style="padding:0;overflow:auto"><table><thead><tr>
+      <th>Código</th><th>Descrição</th><th>Unidade</th><th>Preço NF</th><th>Preço alternativo</th>${editavel?'<th></th>':''}</tr></thead>
+      <tbody>${lista.length?lista.map(m=>`<tr class="mprow" data-s="${(m.codigo+' '+m.descricao).toLowerCase()}">
+        <td><b>${m.codigo}</b></td><td>${m.descricao}</td><td class="muted">${m.unidade||'—'}${m.converter&&num(m.fatorConversao)>0?` <span class="tag blue" style="font-size:10px">1 ${m.unidade||'un'} = ${fmtQtd(num(m.fatorConversao))} ${m.unidadeConsumo||''}</span>`:''}</td>
+        <td>${money(m.precoNota)}${m.converter&&num(m.fatorConversao)>0?`<div class="hint">${money(matPreco(m.id))}/${m.unidadeConsumo||'un'}</div>`:''}</td><td>${money(m.precoAlt)}</td>
+        ${editavel?`<td style="white-space:nowrap"><button class="btn sm" onclick="editarMateria('${m.id}')">✎</button>
+          <button class="btn sm danger" onclick="excluirMateria('${m.id}')">🗑</button></td>`:''}</tr>`).join('')
+        :`<tr><td colspan="${editavel?6:5}" class="muted" style="padding:26px;text-align:center">Nenhuma matéria-prima cadastrada. Use o formulário acima ou importe um Excel/CSV.</td></tr>`}
+      </tbody></table></div></div>`;
+}
+function mpFilter(){ const q=el('mpBusca').value.toLowerCase();
+  document.querySelectorAll('.mprow').forEach(r=>r.style.display=r.dataset.s.includes(q)?'':'none'); }
+function salvarMateria(){
+  const cod=el('mpCod').value.trim(), desc=el('mpDesc').value.trim();
+  if(!cod||!desc){ alert('Informe ao menos Código e Descrição.'); return; }
+  const reg={codigo:cod, descricao:desc, unidade:el('mpUn').value.trim(), precoNota:num(el('mpPnf').value), precoAlt:num(el('mpPalt').value),
+    converter:el('mpConv').checked, unidadeConsumo:el('mpUnCons').value.trim(), fatorConversao:num(el('mpFator').value)};
+  if(mpEdit){ const m=DB.materiais.find(x=>x.id===mpEdit); Object.assign(m,reg); mpEdit=null; }
+  else { DB.materiais.push({id:uid(),...reg}); }
+  DB.historico.push({id:uid(),user:SESSION.nome,acao:'Cadastro de matéria-prima',campo:cod,ant:'—',novo:desc,data:new Date().toISOString()});
+  save(); render();
+}
+function editarMateria(id){
+  const m=DB.materiais.find(x=>x.id===id); if(!m) return;
+  mpEdit=id;
+  el('mpCod').value=m.codigo; el('mpDesc').value=m.descricao; el('mpUn').value=m.unidade||'';
+  el('mpPnf').value=num(m.precoNota).toFixed(2); el('mpPalt').value=num(m.precoAlt).toFixed(2);
+  el('mpConv').checked=!!m.converter; el('mpConvBox').style.display=m.converter?'':'none';
+  el('mpUnCons').value=m.unidadeConsumo||''; el('mpFator').value=m.fatorConversao?num(m.fatorConversao):'';
+  el('mpFormTitle').textContent='Editar: '+m.codigo;
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+function excluirMateria(id){
+  const m=DB.materiais.find(x=>x.id===id); if(!m) return;
+  if(!confirm(`Excluir "${m.codigo} — ${m.descricao}"?`)) return;
+  DB.materiais=DB.materiais.filter(x=>x.id!==id); save(); render();
+}
+function baixarModeloMP(){
+  const csv='codigo;descricao;unidade;preco_nota;preco_alternativo\n'
+    +'MP-0001;Espuma D28;M²;35,90;33,50\n'
+    +'MP-0002;Tecido linho bege;MT;28,00;26,40\n'
+    +'MP-0003;Madeira eucalipto;PC;12,75;11,90\n';
+  downloadFile('modelo_materia_prima.csv','﻿'+csv,'text/csv');
+}
+function onImportMP(inputEl){
+  const file=inputEl.files[0]; if(!file) return;
+  const ext=file.name.split('.').pop().toLowerCase();
+  if(ext==='csv'){ file.text().then(t=>importRowsMP(csvToRows(t))); }
+  else { // xlsx/xls via SheetJS (CDN)
+    loadSheetJS(err=>{
+      if(err){ alert('Para ler .xlsx é preciso internet. Salve a planilha como CSV e importe novamente, ou use "Baixar modelo".'); inputEl.value=''; return; }
+      const reader=new FileReader();
+      reader.onload=e=>{ try{
+        const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'});
+        const ws=wb.Sheets[wb.SheetNames[0]];
+        importRowsMP(XLSX.utils.sheet_to_json(ws,{header:1,raw:false}));
+      }catch(ex){ alert('Não foi possível ler o arquivo.'); } };
+      reader.readAsArrayBuffer(file);
+    });
+  }
+  inputEl.value='';
+}
+function csvToRows(text){
+  const delim = (text.split('\n')[0].match(/;/g)||[]).length >= (text.split('\n')[0].match(/,/g)||[]).length ? ';' : ',';
+  return text.replace(/\r/g,'').split('\n').filter(l=>l.trim()).map(l=>l.split(delim));
+}
+function importRowsMP(rows){
+  if(!rows||!rows.length){ alert('Arquivo vazio.'); return; }
+  let start=0;
+  const first=(rows[0][0]||'').toString().toLowerCase();
+  if(first.includes('cod')||first.includes('cód')) start=1; // pula cabeçalho
+  let add=0, upd=0;
+  for(let i=start;i<rows.length;i++){
+    const r=rows[i]; const cod=(r&&r[0]!=null?r[0]:'').toString().trim(); if(!cod) continue;
+    const dados={ descricao:(r[1]||'').toString().trim(), unidade:(r[2]||'').toString().trim(),
+      precoNota:num(r[3]), precoAlt:num(r[4]) };
+    // upsert por código (não diferencia maiúsc/minúsc)
+    const existente=DB.materiais.find(m=>m.codigo.toLowerCase()===cod.toLowerCase());
+    if(existente){
+      // NÃO altera a conversão de unidade (converter/unidadeConsumo/fatorConversao);
+      // em itens convertidos preserva também a unidade de compra — só atualiza custo e descrição.
+      const upd_data = existente.converter
+        ? {codigo:cod, descricao:dados.descricao, precoNota:dados.precoNota, precoAlt:dados.precoAlt}
+        : {codigo:cod, ...dados};
+      Object.assign(existente, upd_data); upd++;
+    }
+    else { DB.materiais.push({id:uid(), codigo:cod, ...dados}); add++; }
+  }
+  DB.historico.push({id:uid(),user:SESSION.nome,acao:'Importação de matéria-prima',campo:'arquivo',ant:'—',novo:`${add} novos · ${upd} atualizados`,data:new Date().toISOString()});
+  save(); render();
+  alert(`Importação concluída:\n• ${add} novo(s) cadastro(s)\n• ${upd} atualizado(s) (código já existente)`);
+}
+function loadSheetJS(cb){
+  if(window.XLSX) return cb();
+  const s=document.createElement('script');
+  s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+  s.onload=()=>cb(); s.onerror=()=>cb(new Error('offline'));
+  document.head.appendChild(s);
+}
+
+/* ============================================================
+   ENGENHARIA — ficha técnica por blocos + impressão por folha
+   ============================================================ */
+const ENG_BLOCOS=[
+  {key:'madeira',label:'Madeiras',cols:[['quantPed','Quant. Ped.'],['quant1','Quant.'],['compr','Compr.'],['larg','Larg.'],['esp','Espessura'],['obs','Observação']]},
+  {key:'espumas',label:'Espumas',cols:[['quantPed','Quant. Ped.'],['ref','Densidade/Ref.'],['quant','Quant.'],['compr','Comprimento'],['larg','Largura'],['esp','Espessura'],['obs','Obs']]},
+  {key:'papelao',label:'Papelão',cols:[['quant','Quant.'],['compr','Comprimento'],['larg','Largura'],['totChapa','Total de Chapa'],['obs','Obs']]},
+  {key:'ziper',label:'Zíper + Cursor + Velcro',cols:[['tipo','Tipo'],['quant','Quant.'],['comp','Comp.'],['total','Total'],['obs','Obs']]},
+  {key:'fibraManta',label:'Fibra Manta',cols:[['quant','Quant.'],['comp','Comp.'],['larg','Larg.'],['m2','M²'],['esp','Espessura'],['obs','Obs']]},
+  {key:'kitPes',label:'Kit Pés',cols:[['quant','Quant.'],['descricao','Descrição'],['obs','Obs']]},
+  {key:'mantaExpandida',label:'Manta Expandida',cols:[['quant','Quant.'],['comp','Comp.'],['larg','Larg.'],['m2','M²']]},
+  {key:'embalagem',label:'Embalagem',cols:[['quant','Quant.'],['obs','Obs']]},
+  {key:'fibraSilic',label:'Fibra Siliconizada',cols:[['pesoTotal','Peso Total'],['almofadas','Almofadas (1–10)'],['obs','Obs']]},
+  {key:'percinta',label:'Percinta',cols:[['quant','Quant.'],['elast','Elasticidade'],['frenteLado','Frente/Lado']]},
+  {key:'tecido',label:'Tecido',cols:[['qtdPloter','Qtd. (medida ploter)'],['cor','Cor'],['arquivo','Arquivo Plotter'],['obs','Obs']]},
+  {key:'tnt',label:'TNT',cols:[['qtdPloter','Qtd. (ploter) total'],['arquivo','Arquivo Plotter'],['larg','Largura'],['obs','Obs']]},
+  {key:'acessorios',label:'Acessórios',cols:[['descricao','Descrição'],['quant','Quantidade'],['obs','Obs']],matFirst:true}
+];
+// coluna de quantidade (por unidade) usada no custo e na consolidação de cada bloco
+const QTD_KEY={madeira:'quant1',espumas:'quant',papelao:'quant',ziper:'quant',fibraManta:'quant',kitPes:'quant',mantaExpandida:'quant',embalagem:'quant',fibraSilic:'pesoTotal',percinta:'quant',tnt:'qtdPloter',acessorios:'quant'};
+function ziperTotal(r){ return (r.tipo==='Cursor') ? num(r.quant) : num(r.quant)*num(r.comp); }
+function fibraSilicSoma(r){ let s=0; for(let k=1;k<=10;k++) s+=num(r['alm'+k]); return s; }
+function rowQuant(key,r){
+  if(key==='papelao') return num(r.compr)*num(r.larg)*num(r.quant); // Total de Chapa = compr × larg × quant
+  if(key==='ziper') return ziperTotal(r); // Cursor = só quantidade; demais = quant × comprimento
+  if(key==='fibraManta'||key==='mantaExpandida') return num(r.comp)*num(r.larg)*num(r.quant); // M² = comp × larg × quant
+  if(key==='fibraSilic') return fibraSilicSoma(r); // Peso Total = soma das almofadas
+  return num(r[QTD_KEY[key]]);
+}
+const ENG_IDENT=[['tamanho','Tamanho'],['pedido','Pedido'],['lote','Lote'],['revpor','Revisão por'],['criacao','Criação'],['ultrev','Última revisão']];
+const ENG_BASE=ENG_BLOCOS.filter(b=>b.key!=='tecido'); // blocos da composição (sem tecido)
+function engSkuKey(e){ return e.sku||e.item||'(sem nome)'; }
+let engSel=null;
+function engCurrent(){ return DB.engenharias.find(e=>e.id===engSel); }
+function engBlock(eng,key){ if(!eng.blocos[key]) eng.blocos[key]=[]; return eng.blocos[key]; }
+function engHeadLine(eng){ return `SKU: ${eng.sku||'—'} · Item: ${eng.item||'—'} · Tamanho: ${eng.tamanho||'—'} · Pedido: ${eng.pedido||'—'} · Lote: ${eng.lote||'—'} · Rev.: ${eng.ultrev||eng.criacao||'—'}`; }
+/* ---- custo automático via matéria-prima ---- */
+function matById(id){ return DB.materiais.find(m=>m.id===id); }
+function matPreco(id){ const m=id?matById(id):null; if(!m) return 0; const p=num(m.precoNota); return (m.converter && num(m.fatorConversao)>0) ? p/num(m.fatorConversao) : p; }
+function itemCusto(key,r){ return rowQuant(key,r)*matPreco(r.materialId); }
+function blocoSubtotal(eng,key){ return engBlock(eng,key).reduce((a,r)=>a+itemCusto(key,r),0); }
+function engVisivel(eng,key){ return !(eng.ocultos && eng.ocultos.includes(key)); }
+function custoBase(eng){ return ENG_BASE.reduce((a,b)=> a + (engVisivel(eng,b.key)?blocoSubtotal(eng,b.key):0), 0); }
+function tecidoCusto(t){ return num(t.consumo)*matPreco(t.materialId); }
+/* ---- gera fichas por tamanho a partir do produto (SKU) ---- */
+function engEnsureFichas(pid){
+  const prod=DB.produtos.find(p=>p.id===pid); if(!prod) return;
+  const tamanhos=[...new Set(prod.variacoes.map(v=>v.tamanho))];
+  const tecidos=[...new Set(prod.variacoes.map(v=>v.tecido).filter(t=>t&&t!=='—'))];
+  tamanhos.forEach(tz=>{
+    if(!DB.engenharias.some(e=>e.produtoId===pid && e.tamanho===tz)){
+      const eng={id:uid(),produtoId:pid,sku:prod.codigo,item:prod.modelo,tamanho:tz,pedido:'',lote:'',revpor:'',criacao:new Date().toLocaleDateString('pt-BR'),ultrev:'',blocos:{},
+        tecidos:tecidos.map(c=>({classe:c,materialCod:'',materialId:null,consumo:''}))};
+      ENG_BASE.forEach(b=>eng.blocos[b.key]=[]);
+      DB.engenharias.push(eng);
+    }
+  });
+  save();
+}
+function semEngenharia(){ return `<div class="card"><div class="bd" style="text-align:center;padding:50px"><div style="font-size:40px">📐</div><h3 style="margin:10px 0">Nenhum produto cadastrado</h3><p class="muted">Cadastre um <b>SKU com tamanhos e tecidos</b> na aba <b>Produtos</b>. As fichas por tamanho são geradas aqui automaticamente.</p></div></div>`; }
+function viewEngenharia(){
+  const editavel=can('editar');
+  const produtos=DB.produtos;
+  const orphanSkus=[...new Set(DB.engenharias.filter(e=>!e.produtoId).map(engSkuKey))];
+  if(!produtos.length && !DB.engenharias.length) return semEngenharia();
+  // garante seleção
+  if(!engSel || !DB.engenharias.some(e=>e.id===engSel)){
+    if(produtos.length){ engEnsureFichas(produtos[0].id); const f=DB.engenharias.find(e=>e.produtoId===produtos[0].id); engSel=f?f.id:(DB.engenharias[0]&&DB.engenharias[0].id); }
+    else if(DB.engenharias.length){ engSel=DB.engenharias[0].id; }
+  }
+  let eng=engCurrent();
+  const curVal = eng ? (eng.produtoId?('P:'+eng.produtoId):('S:'+engSkuKey(eng))) : '';
+  const irmaos = eng ? (eng.produtoId?DB.engenharias.filter(e=>e.produtoId===eng.produtoId):DB.engenharias.filter(e=>!e.produtoId&&engSkuKey(e)===engSkuKey(eng))) : [];
+  const opts = produtos.map(p=>`<option value="P:${p.id}" ${curVal==='P:'+p.id?'selected':''}>${p.codigo} — ${p.modelo}</option>`).join('')
+    + orphanSkus.map(s=>`<option value="S:${s}" ${curVal==='S:'+s?'selected':''}>${s} (importada)</option>`).join('');
+  let h=`<div class="card no-print" style="margin-bottom:14px"><div class="bd">
+    <div class="row" style="justify-content:space-between;gap:14px;flex-wrap:wrap;align-items:flex-end">
+      <div class="row" style="gap:10px;align-items:flex-end">
+        <div class="field" style="margin:0;min-width:280px"><label>SKU / Produto</label>
+          <select class="inp" id="engProdSel" onchange="engSelGroup(this.value)">${opts||'<option>— nenhum —</option>'}</select></div>
+        ${editavel?`<input type="file" id="engFile" accept=".xlsx,.xls" style="display:none" onchange="engImportarExcel(this)">
+        <button class="btn sm" onclick="el('engFile').click()">⬆ Importar Excel</button>`:''}
+        ${editavel&&eng?`<button class="btn sm danger" onclick="engExcluir()">🗑 Excluir</button>`:''}
+      </div>
+      ${eng?`<div class="row">
+        <button class="btn sm" onclick="engMarcarTodos(true)">Marcar todos</button>
+        <button class="btn sm" onclick="engMarcarTodos(false)">Desmarcar</button>
+        <button class="btn primary sm" onclick="engPrintSelecionados()">🖨 Imprimir selecionados</button>
+        <button class="btn sm" onclick="engPrintTodos()">🖨 Imprimir todos</button>
+      </div>`:''}
+    </div></div></div>`;
+  if(!eng) return h+semEngenharia();
+  h+=`<div class="row no-print" style="align-items:center;gap:12px;margin-bottom:16px">
+    <span class="muted" style="font-size:12.5px">Tamanhos deste SKU:</span>
+    <div class="sub-tabs" style="margin:0;flex-wrap:wrap">
+      ${irmaos.map(e=>`<button class="${e.id===engSel?'active':''}" onclick="engSelId('${e.id}')">${e.tamanho||'sem tamanho'}</button>`).join('')}
+    </div>
+    ${editavel&&eng.produtoId&&irmaos.length>1?`<button class="btn sm" onclick="engAplicarPadroes()" title="Copia os itens marcados como Padrão para as fichas dos outros tamanhos">↧ Aplicar itens padrão aos demais tamanhos</button>`:''}
+  </div>`;
+  h+=`<div class="card no-print" style="margin-bottom:18px"><div class="hd"><div><h3>${eng.item||'—'} <span class="tag blue">${eng.sku||'SKU'}</span></h3><div class="desc">Composição do tamanho <b>${eng.tamanho||'—'}</b> · custo automático pela matéria-prima</div></div></div>
+    <div class="bd"><div class="grid g-3">
+    ${ENG_IDENT.map(([f,l])=>`<div class="field"><label>${l}</label><input class="inp" value="${(eng[f]||'').toString().replace(/"/g,'&quot;')}" oninput="engField('${f}',this.value)" ${editavel?'':'disabled'}></div>`).join('')}
+  </div></div></div>`;
+  h+=`<datalist id="engMatList">${DB.materiais.map(m=>`<option value="${m.codigo} · ${m.descricao}"></option>`).join('')}</datalist>`;
+  if(!DB.materiais.length) h+=`<div class="card no-print" style="margin-bottom:14px"><div class="bd muted">💡 Cadastre insumos com preço na aba <b>Matéria-Prima</b> para o custo ser calculado automaticamente.</div></div>`;
+  h+=ENG_BASE.filter(b=>engVisivel(eng,b.key)).map((blk,i)=>engBlockCard(eng,blk,i,editavel)).join('');
+  const ocultos=ENG_BASE.filter(b=>!engVisivel(eng,b.key));
+  if(editavel && ocultos.length) h+=`<div class="card no-print" style="margin-bottom:18px"><div class="bd row" style="gap:8px;flex-wrap:wrap;align-items:center"><span class="muted" style="font-size:12.5px">Blocos excluídos (clique para restaurar):</span>${ocultos.map(b=>`<button class="btn sm" onclick="engRestaurarBloco('${b.key}')">＋ ${b.label}</button>`).join('')}</div></div>`;
+  h+=engTecidoCard(eng,editavel);
+  h+=`<div class="card eng-block" id="engblock_rollup"><div id="engRollup">${engRollupHTML(eng)}</div></div>`;
+  engAutoFeed(eng); save(); // mantém o custo das variações na Precificação sempre atualizado
+  return h;
+}
+function engCellFor(eng,blk,r,i,c,editavel){
+  const key=blk.key;
+  if(c[0]==='quantPed') return `<td class="eng-tot" id="engqp_${key}_${i}" style="font-weight:700" title="Quant. × Pedido">${fmtQtd(rowQuant(key,r)*num(eng.pedido))}</td>`;
+  if(c[0]==='totChapa') return `<td class="eng-tot" id="engtch_${key}_${i}" style="font-weight:700" title="Compr. × Larg. × Quant.">${fmtQtd(num(r.compr)*num(r.larg)*num(r.quant))}</td>`;
+  if(c[0]==='total' && key==='ziper') return `<td class="eng-tot" id="engttl_${key}_${i}" style="font-weight:700" title="Cursor: só quantidade · demais: Quant. × Comp.">${fmtQtd(ziperTotal(r))}</td>`;
+  if(c[0]==='tipo' && key==='ziper') return `<td><select class="inp" onchange="onEngEdit('ziper',${i},'tipo',this)" ${editavel?'':'disabled'}>${['Zíper','Cursor','Velcro'].map(o=>`<option ${((r.tipo||'Zíper')===o)?'selected':''}>${o}</option>`).join('')}</select></td>`;
+  if(c[0]==='m2' && (key==='fibraManta'||key==='mantaExpandida')) return `<td class="eng-tot" id="engm2_${key}_${i}" style="font-weight:700" title="Compr. × Larg. × Quant.">${fmtQtd(num(r.comp)*num(r.larg)*num(r.quant))}</td>`;
+  if(c[0]==='pesoTotal' && key==='fibraSilic') return `<td class="eng-tot" id="engps_${key}_${i}" style="font-weight:700" title="Soma das almofadas">${fmtQtd(fibraSilicSoma(r))}</td>`;
+  if(c[0]==='almofadas' && key==='fibraSilic') return `<td><div style="display:grid;grid-template-columns:repeat(5,minmax(52px,1fr));gap:4px;min-width:300px">${[1,2,3,4,5,6,7,8,9,10].map(k=>`<input class="inp" style="padding:6px" placeholder="A${k}" value="${(r['alm'+k]==null?'':r['alm'+k]).toString().replace(/"/g,'&quot;')}" oninput="onEngEdit('fibraSilic',${i},'alm${k}',this)" ${editavel?'':'disabled'}>`).join('')}</div></td>`;
+  if(c[0]==='descricao' && (key==='kitPes'||key==='acessorios')) return `<td class="muted" title="Vem da descrição do insumo selecionado">${r.descricao?r.descricao.toString().replace(/</g,'&lt;'):'— selecione o insumo'}</td>`;
+  return `<td><input class="inp" value="${(r[c[0]]==null?'':r[c[0]]).toString().replace(/"/g,'&quot;')}" oninput="onEngEdit('${key}',${i},'${c[0]}',this)" ${editavel?'':'disabled'}></td>`;
+}
+function engBlockCard(eng,blk,idx,editavel){
+  const rows=engBlock(eng,blk.key);
+  const matTh='<th>Matéria-prima</th>';
+  const colsTh=blk.cols.map(c=>`<th>${c[1]}</th>`).join('');
+  const th=(blk.matFirst?matTh+colsTh:colsTh+matTh)+'<th class="no-print" title="Marque para valer em todos os tamanhos">Padrão</th>';
+  const body=rows.map((r,i)=>{
+    const colsCells=blk.cols.map(c=>engCellFor(eng,blk,r,i,c,editavel)).join('');
+    const mc=`<td style="min-width:160px"><input class="inp" list="engMatList" ${(blk.key==='madeira'||blk.key==='espumas')&&i>0&&rows[i-1].materialCod?`placeholder="sugestão: ${(rows[i-1].materialCod||'').replace(/"/g,'&quot;')}" onfocus="engSugereMat('${blk.key}',${i},this)"`:'placeholder="buscar insumo"'} value="${(r.materialCod||'').replace(/"/g,'&quot;')}" onchange="onEngPickMat('${blk.key}',${i},this)" ${editavel?'':'disabled'}></td>`;
+    const pad=`<td class="no-print" style="text-align:center"><input type="checkbox" title="Padrão para todos os tamanhos" ${r.padrao?'checked':''} onchange="onEngPadrao('${blk.key}',${i},this)" ${editavel?'':'disabled'}></td>`;
+    const del=editavel?`<td class="no-print"><button class="btn sm danger" onclick="engDelRow('${blk.key}',${i})">✕</button></td>`:'';
+    return `<tr>${blk.matFirst?mc+colsCells:colsCells+mc}${pad}${del}</tr>`;
+  }).join('');
+  const ncols=blk.cols.length+2;
+  return `<div class="card eng-block" id="engblock_${blk.key}" style="margin-bottom:18px">
+    <div class="hd">
+      <div class="row" style="gap:10px">
+        <input type="checkbox" class="engchk no-print" data-key="${blk.key}" checked style="width:16px;height:16px">
+        <div><h3>${idx+1}. ${blk.label}</h3><div class="desc print-only engprinthead">${engHeadLine(eng)}</div></div>
+      </div>
+      <div class="row no-print">
+        ${editavel?`<button class="btn sm" onclick="engAddRow('${blk.key}')">＋ Linha</button>`:''}
+        <button class="btn sm" onclick="engPrintBloco('${blk.key}')">🖨 Imprimir bloco</button>
+        ${editavel?`<button class="btn sm danger" onclick="engRemoverBloco('${blk.key}')" title="Excluir este bloco do SKU (pode restaurar depois)">🗑</button>`:''}
+      </div>
+    </div>
+    <div class="bd" style="padding:0;overflow:auto"><table><thead><tr>${th}${editavel?'<th class="no-print"></th>':''}</tr></thead>
+    <tbody>${body||`<tr><td colspan="${ncols+(editavel?1:0)}" class="muted" style="padding:16px">Sem itens. Clique em “＋ Linha”.</td></tr>`}</tbody>
+    </table></div></div>`;
+}
+function engTecidoCard(eng,editavel){
+  const tecs=eng.tecidos||[];
+  const body=tecs.map((t,i)=>`<tr>
+    <td><b>${t.classe}</b></td>
+    <td style="min-width:180px"><input class="inp" list="engMatList" placeholder="tecido (insumo)" value="${(t.materialCod||'').replace(/"/g,'&quot;')}" onchange="onEngTecMat(${i},this)" ${editavel?'':'disabled'}></td>
+    <td style="width:120px"><input class="inp eng-tot" value="${t.consumo==null?'':t.consumo}" placeholder="consumo" oninput="onEngTecEdit(${i},this)" ${editavel?'':'disabled'}></td>
+    ${editavel?`<td class="no-print"><button class="btn sm danger" onclick="engDelTec(${i})">✕</button></td>`:''}
+  </tr>`).join('');
+  return `<div class="card eng-block" id="engblock_tecido" style="margin-bottom:18px">
+    <div class="hd">
+      <div class="row" style="gap:10px">
+        <input type="checkbox" class="engchk no-print" data-key="tecido" checked style="width:16px;height:16px">
+        <div><h3>Tecido — variações</h3><div class="desc print-only engprinthead">${engHeadLine(eng)}</div><div class="desc no-print">cada classe usa a mesma composição; o custo aparece no quadro final</div></div>
+      </div>
+      <div class="row no-print">
+        ${editavel?`<button class="btn sm" onclick="engAddTec()">＋ Classe</button>`:''}
+        <button class="btn sm" onclick="engPrintBloco('tecido')">🖨 Imprimir bloco</button>
+      </div>
+    </div>
+    <div class="bd" style="padding:0;overflow:auto"><table><thead><tr>
+      <th>Classe</th><th>Matéria-prima (tecido)</th><th>Consumo</th>${editavel?'<th class="no-print"></th>':''}
+    </tr></thead><tbody>${body||`<tr><td colspan="${editavel?4:3}" class="muted" style="padding:16px">Sem variações. Cadastre tecidos no produto ou clique em “＋ Classe”.</td></tr>`}</tbody></table></div></div>`;
+}
+function engRollupHTML(eng){
+  const base=custoBase(eng);
+  const rows=(eng.tecidos||[]).map(t=>{ const ct=base+tecidoCusto(t); return `<tr><td><b>Tecido ${t.classe}</b></td><td>${money(base)}</td><td>${money(tecidoCusto(t))}</td><td style="color:var(--primary);font-weight:800">${money(ct)}</td></tr>`; }).join('')||`<tr><td colspan="4" class="muted" style="padding:14px">Sem variações de tecido.</td></tr>`;
+  return `<div class="hd"><div><h3>💰 Custo por variação — tamanho ${eng.tamanho||'—'}</h3><div class="desc">Enviado automaticamente para a Precificação de cada variação</div></div></div>
+    <div class="bd">
+    <div class="hint" style="margin-bottom:4px">Custo base (composição sem tecido): <b>${money(base)}</b></div>
+    <div class="hint" style="margin-bottom:10px">Blocos no custo: ${ENG_BASE.filter(b=>engVisivel(eng,b.key)).map(b=>b.label).join(', ')||'nenhum'}</div>
+    <table><thead><tr><th>Variação</th><th>Custo base</th><th>Custo tecido</th><th>Custo total</th></tr></thead><tbody>${rows}</tbody></table>
+    ${engMateriaisTabela(eng)}
+    </div>`;
+}
+function fmtQtd(n){ return Number(n||0).toLocaleString('pt-BR',{maximumFractionDigits:6}); }
+function engMateriaisResumo(eng){
+  const map={};
+  ENG_BASE.filter(b=>engVisivel(eng,b.key)).forEach(b=>{
+    engBlock(eng,b.key).forEach(r=>{
+      const cod=(r.materialCod||'').trim(); if(!cod) return;
+      if(!map[cod]){ const m=matById(r.materialId)||DB.materiais.find(x=>x.codigo.toLowerCase()===cod.toLowerCase()); map[cod]={cod,descricao:m?m.descricao:'',unidade:m?(m.unidade||''):'',qtd:0}; }
+      map[cod].qtd += rowQuant(b.key,r)*num(eng.pedido);
+    });
+  });
+  return Object.values(map).sort((a,b)=>a.cod.localeCompare(b.cod));
+}
+function engMateriaisTabela(eng){
+  const mats=engMateriaisResumo(eng);
+  return `<div style="margin-top:18px">
+    <h3 style="font-size:14px;margin-bottom:8px">📦 Matéria-prima consolidada (quantidade somada)</h3>
+    <div style="overflow:auto"><table><thead><tr><th>Cód. matéria-prima</th><th>Descrição</th><th>Unid.</th><th>Quantidade somada</th></tr></thead>
+    <tbody>${mats.map(m=>`<tr><td><b>${m.cod}</b></td><td>${m.descricao||'—'}</td><td class="muted">${m.unidade||'—'}</td><td class="eng-tot" style="font-weight:700">${fmtQtd(m.qtd)}</td></tr>`).join('')||`<tr><td colspan="4" class="muted" style="padding:12px">Vincule matérias-primas nos blocos para consolidar aqui.</td></tr>`}</tbody></table></div>
+  </div>`;
+}
+function engAutoFeed(eng){
+  const prod=DB.produtos.find(p=>p.id===eng.produtoId); if(!prod) return;
+  const base=custoBase(eng);
+  (eng.tecidos||[]).forEach(t=>{
+    const v=prod.variacoes.find(x=>x.tamanho===eng.tamanho && x.tecido===t.classe);
+    if(v) v.custoTotal = base + tecidoCusto(t);
+  });
+}
+function engRecalc(){
+  const eng=engCurrent(); if(!eng) return;
+  const box=el('engRollup'); if(box) box.innerHTML=engRollupHTML(eng);
+  engAutoFeed(eng); save();
+}
+function onEngEdit(key,i,colKey,inputEl){ const eng=engCurrent(); if(!eng) return; eng.blocos[key][i][colKey]=inputEl.value; save();
+  const r=eng.blocos[key][i];
+  if(key==='papelao' && (colKey==='compr'||colKey==='larg'||colKey==='quant')){
+    const tc=el('engtch_papelao_'+i); if(tc) tc.textContent=fmtQtd(num(r.compr)*num(r.larg)*num(r.quant));
+    engRecalc();
+  } else if(key==='ziper' && (colKey==='quant'||colKey==='comp'||colKey==='tipo')){
+    const tt=el('engttl_ziper_'+i); if(tt) tt.textContent=fmtQtd(ziperTotal(r));
+    engRecalc();
+  } else if((key==='fibraManta'||key==='mantaExpandida') && (colKey==='comp'||colKey==='larg'||colKey==='quant')){
+    const mm=el('engm2_'+key+'_'+i); if(mm) mm.textContent=fmtQtd(num(r.comp)*num(r.larg)*num(r.quant));
+    engRecalc();
+  } else if(key==='fibraSilic' && /^alm\d+$/.test(colKey)){
+    const ps=el('engps_fibraSilic_'+i); if(ps) ps.textContent=fmtQtd(fibraSilicSoma(r));
+    engRecalc();
+  } else if(colKey===QTD_KEY[key]){
+    const qp=el('engqp_'+key+'_'+i); if(qp) qp.textContent=fmtQtd(rowQuant(key,r)*num(eng.pedido));
+    engRecalc();
+  }
+}
+function onEngPadrao(key,i,inputEl){ const eng=engCurrent(); if(!eng) return; eng.blocos[key][i].padrao=inputEl.checked; save(); }
+function engRemoverBloco(key){
+  const eng=engCurrent(); if(!eng) return;
+  const blk=ENG_BASE.find(b=>b.key===key); if(!blk) return;
+  if(!confirm(`Excluir o bloco "${blk.label}" deste SKU?\nEle deixa de aparecer e sai do custo. Você pode restaurá-lo depois.`)) return;
+  const fichas = eng.produtoId ? DB.engenharias.filter(e=>e.produtoId===eng.produtoId) : [eng];
+  fichas.forEach(e=>{ if(!e.ocultos) e.ocultos=[]; if(!e.ocultos.includes(key)) e.ocultos.push(key); });
+  save(); render();
+}
+function engRestaurarBloco(key){
+  const eng=engCurrent(); if(!eng) return;
+  const fichas = eng.produtoId ? DB.engenharias.filter(e=>e.produtoId===eng.produtoId) : [eng];
+  fichas.forEach(e=>{ if(e.ocultos) e.ocultos=e.ocultos.filter(k=>k!==key); });
+  save(); render();
+}
+function engAplicarPadroes(){
+  const eng=engCurrent(); if(!eng||!eng.produtoId) return;
+  const irmaos=DB.engenharias.filter(e=>e.produtoId===eng.produtoId && e.id!==eng.id);
+  if(!irmaos.length){ alert('Não há outros tamanhos para receber os itens padrão.'); return; }
+  let count=0;
+  ENG_BASE.forEach(b=>{
+    const padroes=engBlock(eng,b.key).filter(r=>r.padrao);
+    irmaos.forEach(sib=>{
+      if(!sib.blocos) sib.blocos={};
+      const arr=sib.blocos[b.key]||[];
+      // substitui os itens padrão do irmão pelos atuais (mantém os itens específicos do tamanho)
+      sib.blocos[b.key]=arr.filter(r=>!r.padrao).concat(padroes.map(r=>JSON.parse(JSON.stringify(r))));
+      count+=padroes.length;
+    });
+  });
+  save(); render();
+  alert(`Itens padrão aplicados a ${irmaos.length} tamanho(s). ${count} cópia(s) de item atualizada(s).`);
+}
+function onEngPickMat(key,i,inputEl){
+  const eng=engCurrent(); if(!eng) return;
+  const val=inputEl.value.trim();
+  const cod = val.includes(' · ') ? val.split(' · ')[0].trim() : val;
+  const mat=DB.materiais.find(m=>m.codigo.toLowerCase()===cod.toLowerCase());
+  const r=eng.blocos[key][i];
+  r.materialCod = mat?mat.codigo:val; r.materialId = mat?mat.id:null;
+  // preenche a Descrição automaticamente com a descrição do insumo (blocos que têm essa coluna, ex.: Kit Pés)
+  const blk=ENG_BLOCOS.find(b=>b.key===key);
+  if(mat && blk && blk.cols.some(c=>c[0]==='descricao')) r.descricao=mat.descricao;
+  save(); render();
+}
+function onEngTecEdit(i,inputEl){ const eng=engCurrent(); if(!eng) return; eng.tecidos[i].consumo=inputEl.value; save(); engRecalc(); }
+function onEngTecMat(i,inputEl){
+  const eng=engCurrent(); if(!eng) return;
+  const val=inputEl.value.trim(); const cod=val.includes(' · ')?val.split(' · ')[0].trim():val;
+  const mat=DB.materiais.find(m=>m.codigo.toLowerCase()===cod.toLowerCase());
+  eng.tecidos[i].materialCod = mat?mat.codigo:val; eng.tecidos[i].materialId = mat?mat.id:null;
+  save(); render();
+}
+function engAddTec(){ const eng=engCurrent(); (eng.tecidos||(eng.tecidos=[])).push({classe:prompt('Classe do tecido (ex.: A):','')||'',materialCod:'',materialId:null,consumo:''}); save(); render(); }
+function engDelTec(i){ const eng=engCurrent(); eng.tecidos.splice(i,1); save(); render(); }
+function engField(f,v){ const eng=engCurrent(); if(!eng) return; eng[f]=v; save();
+  document.querySelectorAll('.engprinthead').forEach(x=>x.textContent=engHeadLine(eng));
+  if(f==='pedido'){ ENG_BASE.forEach(b=>{ if(b.cols.some(c=>c[0]==='quantPed')) engBlock(eng,b.key).forEach((r,i)=>{ const qp=el('engqp_'+b.key+'_'+i); if(qp) qp.textContent=fmtQtd(rowQuant(b.key,r)*num(v)); }); }); engRecalc(); } }
+function engAddRow(key){ const eng=engCurrent(); const blk=ENG_BLOCOS.find(b=>b.key===key); const o={}; blk.cols.forEach(c=>o[c[0]]=''); o.materialCod=''; o.materialId=null;
+  const arr=engBlock(eng,key);
+  if((key==='madeira'||key==='espumas') && arr.length){ const prev=arr[arr.length-1]; o.materialCod=prev.materialCod||''; o.materialId=prev.materialId||null; }
+  arr.push(o); save(); render(); }
+function engSugereMat(key,i,inp){
+  if(inp.value.trim()!=='') return;
+  const eng=engCurrent(); const arr=engBlock(eng,key); const prev=arr[i-1];
+  if(prev && prev.materialCod){ inp.value=prev.materialCod; arr[i].materialCod=prev.materialCod; arr[i].materialId=prev.materialId||null; save(); engRecalc(); }
+}
+function engDelRow(key,i){ const eng=engCurrent(); eng.blocos[key].splice(i,1); save(); render(); }
+function engSelId(id){ engSel=id; render(); }
+function engSelGroup(val){
+  if(val.startsWith('P:')){ const pid=val.slice(2); engEnsureFichas(pid); const f=DB.engenharias.find(e=>e.produtoId===pid); engSel=f?f.id:null; }
+  else { const sku=val.slice(2); const f=DB.engenharias.find(e=>!e.produtoId && engSkuKey(e)===sku); if(f) engSel=f.id; }
+  render();
+}
+function engDuplicar(){
+  const base=engCurrent(); if(!base) return;
+  const novoTam=prompt('Tamanho da nova ficha (ex.: 1,80):', '');
+  if(novoTam===null) return;
+  const eng=JSON.parse(JSON.stringify(base));
+  eng.id=uid(); eng.tamanho=(novoTam||'').trim();
+  DB.engenharias.push(eng); engSel=eng.id;
+  DB.historico.push({id:uid(),user:SESSION.nome,acao:'Duplicação de ficha (novo tamanho)',campo:eng.sku||eng.item,ant:base.tamanho||'—',novo:eng.tamanho||'(sem tamanho)',data:new Date().toISOString()});
+  save(); render();
+}
+function engExcluir(){ const eng=engCurrent(); if(!eng) return; if(!confirm('Excluir a ficha do tamanho "'+(eng.tamanho||'—')+'"?')) return;
+  DB.engenharias=DB.engenharias.filter(e=>e.id!==engSel); engSel=null; save(); render(); }
+function engMarcarTodos(v){ document.querySelectorAll('.engchk').forEach(c=>c.checked=v); }
+/* ----- Importação da planilha padrão de engenharia (.xlsx) ----- */
+function engImportarExcel(inputEl){
+  const file=inputEl.files[0]; if(!file){ return; }
+  loadSheetJS(err=>{
+    if(err){ alert('Para importar .xlsx é preciso internet. Tente novamente conectado.'); inputEl.value=''; return; }
+    const reader=new FileReader();
+    reader.onload=e=>{ try{
+      const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array',cellDates:true});
+      const nome = wb.SheetNames.indexOf('PADRÃO')>=0?'PADRÃO':wb.SheetNames[0];
+      const M=XLSX.utils.sheet_to_json(wb.Sheets[nome],{header:1,raw:false,defval:''});
+      const eng=parseEngSheet(M, file.name);
+      DB.engenharias.push(eng); engSel=eng.id;
+      DB.historico.push({id:uid(),user:SESSION.nome,acao:'Importação de engenharia',campo:eng.item||file.name,ant:'—',novo:'ficha importada',data:new Date().toISOString()});
+      save(); render();
+      alert('Ficha de engenharia importada: '+(eng.item||file.name));
+    }catch(ex){ console.error(ex); alert('Não foi possível ler a planilha. Verifique se é a ficha padrão de engenharia.'); } };
+    reader.readAsArrayBuffer(file);
+  });
+  inputEl.value='';
+}
+function parseEngSheet(M, fname){
+  const cell=(r,i)=>{ let v=(M[r]&&M[r][i]!=null)?M[r][i]:''; if(typeof v==='number') v=Math.round(v*1e6)/1e6; return (''+v).trim(); };
+  const TITLES=['MADEIRAS','ESPUMAS','PAPELÃO CHAPA','ZIPER','CURSOR','VELCRO','FIBRA MANTA','KIT PES','MANTA EXPANDIDA','MALHA','PAPELÃO EMBALAGEM','FIBRA SILICONIZADA','PERCINTA','TECIDO','TNT','ACESSÓRIOS'];
+  const pos={};
+  for(let r=0;r<M.length;r++){ for(const c of [0,1]){ const v=cell(r,c); if(TITLES.indexOf(v)>=0 && pos[v]==null) pos[v]=r; } }
+  const reg=(t,nx)=>({a: pos[t]==null?null:pos[t], b: pos[nx]!=null?pos[nx]:M.length});
+  const isHeader=(r)=>{ for(let i=0;i<12;i++){ const v=cell(r,i).toUpperCase(); if(v.indexOf('QUANTIDADE SISTEMA')>=0||v==='PEDIDO'||v==='ITEM.'||v==='PESO TOTAL') return true; } return false; };
+  const rowsOf=(t,nx)=>{ const g=reg(t,nx); const out=[]; if(g.a==null) return out; for(let r=g.a+1;r<g.b;r++){ if(isHeader(r)) continue; out.push(r); } return out; };
+  const nb=(o,keys)=>keys.some(k=>{ const s=(''+(o[k]||'')).trim(); return s!=='' && s!=='0'; });
+  const B={};
+  B.madeira=[]; for(const r of rowsOf('MADEIRAS','ESPUMAS')){ const o={quantPed:cell(r,1),quant1:cell(r,2),compr:cell(r,3),larg:cell(r,4),esp:cell(r,5),qtdSist:cell(r,6),peca:cell(r,7),obs:cell(r,8)}; if(nb(o,['quantPed','compr'])) B.madeira.push(o); }
+  B.espumas=[]; { const g=reg('ESPUMAS','PAPELÃO CHAPA'); let ref=''; if(g.a!=null) for(let r=g.a+1;r<g.b;r++){ const b=cell(r,1); if(b.charAt(0)==='D' && b.toUpperCase().indexOf('REF')>=0){ ref=b; continue; } if(isHeader(r)) continue; const o={ref,pedido:cell(r,1),quant:cell(r,2),compr:cell(r,3),larg:cell(r,4),esp:cell(r,5),qtdSist:cell(r,6),peca:cell(r,7),obs:cell(r,8)}; if(nb(o,['compr','pedido'])) B.espumas.push(o); } }
+  B.papelao=[]; for(const r of rowsOf('PAPELÃO CHAPA','ZIPER')){ const o={quant:cell(r,1),compr:cell(r,2),larg:cell(r,3),totChapa:cell(r,4),qtdSist:cell(r,5),peca:cell(r,6),obs:cell(r,7)}; if(nb(o,['quant','compr'])) B.papelao.push(o); }
+  B.ziper=[]; for(const gr of [['ZIPER','CURSOR',1],['CURSOR','VELCRO',0],['VELCRO','FIBRA MANTA',0]]){ for(const r of rowsOf(gr[0],gr[1])){ const o=gr[2]?{grupo:'ZÍPER',quant:cell(r,1),comp:cell(r,2),qtdSist:cell(r,3),peca:cell(r,4),obs:cell(r,5)}:{grupo:gr[0],quant:cell(r,1),comp:'',qtdSist:cell(r,2),peca:cell(r,3),obs:cell(r,4)}; if(nb(o,['quant','peca','obs'])) B.ziper.push(o); } }
+  B.fibraManta=[]; for(const r of rowsOf('FIBRA MANTA','KIT PES')){ const o={quant:cell(r,1),comp:cell(r,2),larg:cell(r,3),m2:cell(r,4),esp:cell(r,5),qtdSist:cell(r,6),peca:cell(r,7),obs:cell(r,8)}; if(nb(o,['quant','comp'])) B.fibraManta.push(o); }
+  B.kitPes=[]; for(const r of rowsOf('KIT PES','MANTA EXPANDIDA')){ const o={quant:cell(r,1),cod:cell(r,2),descricao:cell(r,3),qtdSist:cell(r,6),peca:cell(r,7),obs:cell(r,8)}; if(nb(o,['quant','cod','descricao'])) B.kitPes.push(o); }
+  B.mantaExpandida=[]; for(const r of rowsOf('MANTA EXPANDIDA','MALHA')){ const o={quant:cell(r,1),comp:cell(r,2),larg:cell(r,3),m2:cell(r,4),qtdSist:cell(r,5),peca:cell(r,6),loc:cell(r,7)}; if(nb(o,['quant','comp'])) B.mantaExpandida.push(o); }
+  B.embalagem=[]; for(const r of rowsOf('PAPELÃO EMBALAGEM','FIBRA SILICONIZADA')){ const o={quant:cell(r,1),qtdSist:cell(r,2),peca:cell(r,3),obs:cell(r,4)}; if(nb(o,['quant','peca'])) B.embalagem.push(o); }
+  B.fibraSilic=[]; for(const r of rowsOf('FIBRA SILICONIZADA','PERCINTA')){ const o={pesoTotal:cell(r,1),alm1:cell(r,2),alm2:cell(r,3),alm3:cell(r,4),alm4:cell(r,5),qtdSist:cell(r,6),peca:cell(r,7),obs:cell(r,8)}; if(nb(o,['pesoTotal','alm1','peca','obs'])) B.fibraSilic.push(o); }
+  B.percinta=[]; for(const r of rowsOf('PERCINTA','TECIDO')){ const o={quant:cell(r,1),tipo:cell(r,2),elast:cell(r,3),qtdSist:cell(r,4),peca:cell(r,5),frenteLado:cell(r,6)}; if(nb(o,['quant','tipo','peca'])) B.percinta.push(o); }
+  B.tecido=[]; for(const r of rowsOf('TECIDO','TNT')){ const o={qtdPloter:cell(r,1),cor:cell(r,2),arquivo:cell(r,3),qtdSist:cell(r,4),peca:cell(r,5),obs:cell(r,6)}; if(nb(o,['qtdPloter','peca','obs'])) B.tecido.push(o); }
+  B.tnt=[]; for(const r of rowsOf('TNT','ACESSÓRIOS')){ const o={qtdPloter:cell(r,1),esp:cell(r,2),arquivo:cell(r,3),larg:cell(r,4),qtdSist:cell(r,5),peca:cell(r,6),obs:cell(r,7)}; if(nb(o,['qtdPloter','esp','arquivo'])) B.tnt.push(o); }
+  B.acessorios=[]; { const g=reg('ACESSÓRIOS',null); if(g.a!=null) for(let r=g.a+1;r<g.b;r++){ if(isHeader(r)) continue; const o={item:cell(r,1),q3l:cell(r,2),q2l:cell(r,3),cod:cell(r,5),qtdSist:cell(r,6),obs:cell(r,7)}; if(nb(o,['item','cod'])) B.acessorios.push(o); } }
+  ENG_BLOCOS.forEach(b=>{ if(!B[b.key]) B[b.key]=[]; });
+  const item=cell(1,3)||fname.replace(/\.(xlsx|xls)$/i,'');
+  // Tenta separar SKU (código no início, ex.: AC279) e Tamanho (ex.: 2,00CM) do nome do item
+  const skuM=item.match(/^\s*([A-Za-z]{1,5}\d{1,6})/);
+  const tamM=item.match(/(\d+[.,]?\d*\s*CM|\bKING\b|\bQUEEN\b|\bCASAL\b|\bSOLTEIRO\b|\bVI[UÚ]VA\b)/i);
+  const sku=skuM?skuM[1]:'';
+  const tamanho=tamM?tamM[1].trim():'';
+  return { id:uid(), produtoId:null, item, sku, tamanho, tecidos:[], pedido:cell(6,4), lote:cell(6,7), revpor:cell(3,3), criacao:cell(3,7), ultrev:cell(4,7), blocos:B };
+}
+function engSyncSkip(){ document.querySelectorAll('.engchk').forEach(c=>{ const b=el('engblock_'+c.dataset.key); if(b) b.classList.toggle('skip-print', !c.checked); }); }
+function engPrintSelecionados(){ if(!document.querySelector('.engchk:checked')){ alert('Selecione ao menos um bloco.'); return; } engSyncSkip(); window.print(); }
+function engPrintTodos(){ document.querySelectorAll('.eng-block').forEach(b=>b.classList.remove('skip-print')); window.print(); }
+function engPrintBloco(key){ document.querySelectorAll('.eng-block').forEach(b=>b.classList.toggle('skip-print', b.id!=='engblock_'+key)); window.print(); }
+
+/* ============================================================
+   PRODUTOS
+   ============================================================ */
+function viewProdutos(){
+  let h=`<div class="row" style="justify-content:space-between;margin-bottom:16px">
+    <input class="inp" style="max-width:320px" id="prodBusca" placeholder="🔎 Buscar código, modelo, tamanho, tecido..." oninput="filterProd()">
+    <div class="row">
+      ${can('editar')?'<button class="btn primary sm" onclick="openNovoProduto()">＋ Novo produto</button>':''}
+    </div></div><div id="prodList">`;
+  h+= DB.produtos.length? DB.produtos.map(p=>produtoCard(p)).join('') : semProdutos('Clique em “＋ Novo produto” para cadastrar o primeiro.');
+  return h+'</div>';
+}
+function produtoCard(p){
+  const rows=p.variacoes.map(v=>{const r=calcVar(v);const st=margemStatus(r.mcPct);
+    return `<tr class="prow" data-s="${(p.codigo+' '+p.modelo+' '+v.rotulo+' '+v.tamanho+' '+(v.tecido||'')).toLowerCase()}">
+      <td><b>${v.rotulo}</b></td><td class="muted">${v.tamanho}</td><td class="muted">${v.tecido||v.medida||'—'}</td>
+      <td>${money(v.custoTotal)}</td><td><b>${money(r.preco)}</b></td>
+      <td>${money(r.mc)}</td><td><span class="tag ${st.cor}">${pct(r.mcPct)}</span></td></tr>`;}).join('');
+  return `<div class="card" style="margin-bottom:16px"><div class="hd">
+    <div class="row" style="gap:12px;align-items:center;min-width:0">
+      ${p.imagem?`<img src="${p.imagem}" class="prod-thumb">`:''}
+      <div style="min-width:0"><h3>${p.modelo} <span class="tag blue" style="margin-left:6px">${p.familia}</span></h3>
+      <div class="desc">SKU ${p.codigo} · ${p.categoria} · ${p.variacoes.length} variações</div></div>
+    </div>
+    <div class="row" style="gap:8px">
+      ${can('editar')?`<label class="btn sm" style="cursor:pointer">${p.imagem?'🖼 Trocar':'📷 Imagem'}<input type="file" accept="image/*" style="display:none" onchange="onProdImg('${p.id}',this)"></label>`:''}
+      ${can('editar')?`<button class="btn sm danger" onclick="excluirProduto('${p.id}')">🗑</button>`:''}
+    </div></div>
+    <div class="bd" style="padding:0;overflow:auto"><table><thead><tr><th>Variação</th><th>Tamanho</th><th>Tecido/Medida</th><th>Custo</th><th>Preço</th><th>MC R$</th><th>Margem</th></tr></thead>
+    <tbody>${rows}</tbody></table></div></div>`;
+}
+function onProdImg(pid,input){ const f=input.files[0]; if(!f) return; readImageResized(f,500,d=>{ const p=DB.produtos.find(x=>x.id===pid); if(p){ p.imagem=d; save(); render(); } }); }
+function readImageResized(file,maxW,cb){
+  const reader=new FileReader();
+  reader.onload=e=>{ const img=new Image(); img.onload=()=>{ const scale=Math.min(1,maxW/img.width); const w=Math.round(img.width*scale), h=Math.round(img.height*scale); const c=document.createElement('canvas'); c.width=w; c.height=h; c.getContext('2d').drawImage(img,0,0,w,h); try{ cb(c.toDataURL('image/jpeg',0.75)); }catch(err){ alert('Não foi possível processar a imagem.'); } }; img.src=e.target.result; };
+  reader.readAsDataURL(file);
+}
+function filterProd(){const q=el('prodBusca').value.toLowerCase();
+  document.querySelectorAll('.prow').forEach(r=>r.style.display=r.dataset.s.includes(q)?'':'none');}
+function excluirProduto(pid){
+  if(!can('editar')) return;
+  const p=DB.produtos.find(x=>x.id===pid); if(!p) return;
+  if(!confirm(`Excluir "${p.modelo}" e suas ${p.variacoes.length} variações?`)) return;
+  DB.produtos=DB.produtos.filter(x=>x.id!==pid);
+  DB.historico.push({id:uid(),user:SESSION.nome,acao:'Exclusão de produto',campo:p.codigo,ant:p.modelo,novo:'excluído',data:new Date().toISOString()});
+  save(); render();
+}
+
+/* ---------- Formulário: novo produto ---------- */
+let NP=null;
+function openNovoProduto(){
+  NP={familia:'Sofás', sku:'', nome:'', cat:'', tamanhos:[], tecidos:['A','B','C','D']};
+  renderModal();
+}
+function closeModal(){ el('modalRoot').innerHTML=''; NP=null; }
+function npAddChip(field, inputId){
+  const inp=el(inputId); const val=inp.value.trim();
+  if(!val) return;
+  if(!NP[field].includes(val)) NP[field].push(val);
+  renderModal();
+  setTimeout(()=>{const f=el(inputId); if(f) f.focus();},0);
+}
+function npRemoveChip(field, i){ NP[field].splice(i,1); renderModal(); }
+function chipList(field){
+  return NP[field].map((t,i)=>`<span class="chip-x">${t}<b onclick="npRemoveChip('${field}',${i})">✕</b></span>`).join('') || '<span class="muted" style="font-size:12px">nenhum adicionado</span>';
+}
+function nVariacoes(){ return NP.tamanhos.length * (NP.familia==='Sofás'? Math.max(NP.tecidos.length,1) : 1); }
+function npImagem(input){ const f=input.files[0]; if(!f) return; readImageResized(f,500,d=>{ NP.imagem=d; renderModal(); }); }
+function renderModal(){
+  const isSofa = NP.familia==='Sofás';
+  el('modalRoot').innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
+    <div class="modal-hd"><div><h3>Novo produto</h3><div class="desc muted" style="font-size:12px">As variações são geradas automaticamente por tamanho${isSofa?' × classe de tecido':''}</div></div>
+      <button class="btn sm" onclick="closeModal()">✕</button></div>
+    <div class="modal-bd">
+      <div class="grid g-2">
+        <div class="field"><label>SKU / Código</label><input class="inp" id="npSku" value="${NP.sku}" placeholder="ex.: SOF-VER" oninput="NP.sku=this.value"></div>
+        <div class="field"><label>Nome do produto</label><input class="inp" id="npNome" value="${NP.nome}" placeholder="ex.: Sofá Verona" oninput="NP.nome=this.value"></div>
+      </div>
+      <div class="grid g-2">
+        <div class="field"><label>Família</label><select class="inp" id="npFam" onchange="NP.familia=this.value;renderModal()">
+          <option ${isSofa?'selected':''}>Sofás</option><option ${!isSofa?'selected':''}>Colchões</option></select></div>
+        <div class="field"><label>Categoria (opcional)</label><input class="inp" id="npCat" value="${NP.cat}" placeholder="ex.: Retrátil / Molas" oninput="NP.cat=this.value"></div>
+      </div>
+
+      <div class="field"><label>Imagem do produto (opcional)</label>
+        <div class="row" style="gap:12px;align-items:center">
+          ${NP.imagem?`<img src="${NP.imagem}" class="prod-thumb">`:''}
+          <label class="img-drop" style="flex:1;margin:0">${NP.imagem?'🖼 Trocar imagem':'📷 Enviar imagem'}<input type="file" accept="image/*" style="display:none" onchange="npImagem(this)"></label>
+          ${NP.imagem?`<button class="btn sm" onclick="NP.imagem='';renderModal()">Remover</button>`:''}
+        </div></div>
+
+      <div class="field"><label>${isSofa?'Tamanhos (largura)':'Medidas / tamanhos'}</label>
+        <div class="chips">${chipList('tamanhos')}</div>
+        <div class="add-row"><input class="inp" id="npTamInp" placeholder="${isSofa?'ex.: 1,80':'ex.: Casal 138x188'}" onkeydown="if(event.key==='Enter'){event.preventDefault();npAddChip('tamanhos','npTamInp')}">
+          <button class="btn" onclick="npAddChip('tamanhos','npTamInp')">＋ Adicionar</button></div></div>
+
+      ${isSofa?`<div class="field"><label>Classes de tecido</label>
+        <div class="chips">${chipList('tecidos')}</div>
+        <div class="add-row"><input class="inp" id="npTecInp" placeholder="ex.: A, B, Premium..." onkeydown="if(event.key==='Enter'){event.preventDefault();npAddChip('tecidos','npTecInp')}">
+          <button class="btn" onclick="npAddChip('tecidos','npTecInp')">＋ Adicionar</button></div></div>`:''}
+
+      <div class="card" style="background:var(--surface-2);margin-top:6px"><div class="bd" style="padding:12px 16px">
+        <b>${nVariacoes()}</b> variações serão criadas ${isSofa?`(${NP.tamanhos.length} tamanhos × ${NP.tecidos.length} tecidos)`:''}. O custo de cada uma é preenchido na tela <b>Precificação</b>.</div></div>
+    </div>
+    <div class="modal-ft"><button class="btn" onclick="closeModal()">Cancelar</button>
+      <button class="btn primary" onclick="salvarProduto()">Salvar produto</button></div>
+  </div></div>`;
+}
+function salvarProduto(){
+  if(!NP.sku.trim()||!NP.nome.trim()){ alert('Informe SKU e Nome.'); return; }
+  if(!NP.tamanhos.length){ alert('Adicione ao menos um tamanho/medida.'); return; }
+  const isSofa=NP.familia==='Sofás';
+  const emptyCost=()=>({espuma:0,madeira:0,molas:0,ferragens:0,tecido:0,pes:0,embalagem:0,cola:0,grampos:0,plasticos:0,maoObra:0,energia:0,outros:0,freteInd:0});
+  const prod={id:uid(),familia:NP.familia,modelo:NP.nome.trim(),codigo:NP.sku.trim(),categoria:NP.cat.trim()||'—',imagem:NP.imagem||'',variacoes:[]};
+  NP.tamanhos.forEach(tz=>{
+    if(isSofa){
+      (NP.tecidos.length?NP.tecidos:['Única']).forEach(tc=>{
+        prod.variacoes.push({id:uid(),rotulo:`${tz} · Classe ${tc}`,tamanho:tz,tecido:tc,custo:emptyCost(),custoTotal:0});
+      });
+    } else {
+      prod.variacoes.push({id:uid(),rotulo:tz,tamanho:tz,tecido:'—',medida:tz,custo:emptyCost(),custoTotal:0});
+    }
+  });
+  DB.produtos.push(prod);
+  DB.historico.push({id:uid(),user:SESSION.nome,acao:'Cadastro de produto',campo:prod.codigo,ant:'—',novo:`${prod.modelo} (${prod.variacoes.length} var.)`,data:new Date().toISOString()});
+  save(); closeModal(); render();
+}
+
+/* ============================================================
+   IMPOSTOS & DESPESAS
+   ============================================================ */
+function viewImpostos(){
+  if(!menuAllowed('impostos')) return lockView('Seu perfil não tem acesso a este menu.');
+  const TL={icms:'ICMS',pis:'PIS',cofins:'COFINS',ipi:'IPI',irpj:'IRPJ',csll:'CSLL',iss:'ISS',outros:'Outros impostos'};
+  const DL={freteVenda:'Frete de venda',marketplace:'Marketplace',bonificacoes:'Bonificações',descontos:'Descontos comerciais',marketing:'Marketing',outras:'Outras despesas'};
+  const somaImp=Object.values(DB.taxes).reduce((a,b)=>a+b,0);
+  const somaDesp=Object.values(DB.desp).reduce((a,b)=>a+b,0);
+  return `<div class="grid g-2">
+    <div class="card"><div class="hd"><div><h3>Impostos (Lucro Real)</h3><div class="desc">Cada alíquota é configurável — total ${pct(somaImp)}</div></div></div>
+      <div class="bd"><div class="grid g-2">
+      ${Object.entries(TL).map(([k,l])=>`<div class="field"><label>${l}</label><div class="inp-group">
+        <input class="inp" id="gt_${k}" value="${DB.taxes[k]}"><span class="suffix">%</span></div></div>`).join('')}
+      </div></div></div>
+    <div class="card"><div class="hd"><div><h3>Despesas variáveis & comissão</h3><div class="desc">Total despesas ${pct(somaDesp)} · comissão ${pct(DB.comissao)}</div></div></div>
+      <div class="bd"><div class="field"><label>Comissão</label><div class="inp-group"><input class="inp" id="gcom" value="${DB.comissao}"><span class="suffix">%</span></div></div>
+      <div class="grid g-2">
+      ${Object.entries(DL).map(([k,l])=>`<div class="field"><label>${l}</label><div class="inp-group">
+        <input class="inp" id="gd_${k}" value="${DB.desp[k]}"><span class="suffix">%</span></div></div>`).join('')}
+      </div></div></div>
+  </div>
+  <div class="card" style="margin-top:18px"><div class="bd row" style="justify-content:space-between">
+    <div class="muted">Alterações registram no histórico com usuário, data e valores anterior/novo.</div>
+    <button class="btn primary" onclick="salvarImpostos()">💾 Salvar parâmetros</button></div></div>`;
+}
+function salvarImpostos(){
+  const antes=JSON.stringify({t:DB.taxes,d:DB.desp,c:DB.comissao});
+  ['icms','pis','cofins','ipi','irpj','csll','iss','outros'].forEach(k=>{const nv=num(el('gt_'+k).value);
+    if(nv!==DB.taxes[k]) DB.historico.push({id:uid(),user:SESSION.nome,acao:'Alteração de imposto',campo:k.toUpperCase(),ant:DB.taxes[k]+'%',novo:nv+'%',data:new Date().toISOString()});
+    DB.taxes[k]=nv;});
+  ['freteVenda','marketplace','bonificacoes','descontos','marketing','outras'].forEach(k=>DB.desp[k]=num(el('gd_'+k).value));
+  DB.comissao=num(el('gcom').value);
+  save();alert('Parâmetros fiscais atualizados.');render();
+}
+
+/* ============================================================
+   RELATÓRIOS
+   ============================================================ */
+function viewRelatorios(){
+  const vars=todasVariacoes().map(v=>({v,r:calcVar(v)}));
+  return `<div class="row" style="justify-content:space-between;margin-bottom:16px">
+    <div class="sub-tabs" style="margin:0"><button class="active" onclick="repTab(this,'rTudo')">Produtos & Margem</button>
+      <button onclick="repTab(this,'rFam')">Por família</button><button onclick="repTab(this,'rTec')">Por tecido</button>
+      <button onclick="repTab(this,'rHist')">Histórico</button></div>
+    <div class="row"><button class="btn sm" onclick="exportCSV()">⬇ CSV</button>
+      <button class="btn sm" onclick="exportExcel()">⬇ Excel</button>
+      <button class="btn sm" onclick="window.print()">⬇ PDF / Imprimir</button></div></div>
+
+  <div id="rTudo" class="card"><div class="bd" style="padding:0"><table><thead><tr>
+    <th>Código</th><th>Família</th><th>Modelo</th><th>Variação</th><th>Custo</th><th>Preço</th><th>MC R$</th><th>Margem</th></tr></thead>
+    <tbody>${vars.map(x=>`<tr><td class="muted">${x.v.produto.codigo}</td><td>${x.v.produto.familia}</td><td>${x.v.produto.modelo}</td>
+      <td>${x.v.rotulo}</td><td>${money(x.v.custoTotal)}</td><td><b>${money(x.r.preco)}</b></td><td>${money(x.r.mc)}</td>
+      <td><span class="tag ${margemStatus(x.r.mcPct).cor}">${pct(x.r.mcPct)}</span></td></tr>`).join('')}</tbody></table></div></div>
+
+  <div id="rFam" class="card hidden"><div class="bd">${groupReport(vars, x=>x.v.produto.familia)}</div></div>
+  <div id="rTec" class="card hidden"><div class="bd">${groupReport(vars, x=>'Classe '+(x.v.tecido||'—'))}</div></div>
+  <div id="rHist" class="card hidden"><div class="bd" style="padding:0"><table><thead><tr><th>Data</th><th>Usuário</th><th>Ação</th><th>Campo</th><th>Anterior</th><th>Novo</th></tr></thead>
+    <tbody>${DB.historico.slice().reverse().map(h=>`<tr><td class="muted">${new Date(h.data).toLocaleString('pt-BR')}</td><td>${h.user}</td>
+      <td>${h.acao}</td><td class="muted">${h.campo}</td><td class="muted">${h.ant}</td><td><b>${h.novo}</b></td></tr>`).join('')}</tbody></table></div></div>`;
+}
+function groupReport(vars,keyFn){
+  const g={};vars.forEach(x=>{const k=keyFn(x);(g[k]??=[]).push(x);});
+  return `<table><thead><tr><th>Grupo</th><th>Variações</th><th>Custo médio</th><th>Preço médio</th><th>MC média R$</th><th>Margem média</th></tr></thead><tbody>
+  ${Object.entries(g).map(([k,arr])=>{const n=arr.length;const cm=arr.reduce((a,b)=>a+b.v.custoTotal,0)/n;
+    const pm=arr.reduce((a,b)=>a+b.r.preco,0)/n;const mcm=arr.reduce((a,b)=>a+b.r.mc,0)/n;const mm=arr.reduce((a,b)=>a+b.r.mcPct,0)/n;
+    return `<tr><td><b>${k}</b></td><td>${n}</td><td>${money(cm)}</td><td>${money(pm)}</td><td>${money(mcm)}</td>
+      <td><span class="tag ${margemStatus(mm).cor}">${pct(mm)}</span></td></tr>`;}).join('')}</tbody></table>`;
+}
+function repTab(btn,id){btn.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('active'));btn.classList.add('active');
+  ['rTudo','rFam','rTec','rHist'].forEach(v=>el(v).classList.add('hidden'));el(id).classList.remove('hidden');}
+function csvRows(){
+  const vars=todasVariacoes().map(v=>({v,r:calcVar(v)}));
+  const head=['Codigo','Familia','Modelo','Variacao','Tamanho','Tecido','Custo','Preco','ICMS_Rs','Comissao_Rs','Despesas_Rs','MC_Rs','Margem_pct'];
+  const rows=vars.map(x=>[x.v.produto.codigo,x.v.produto.familia,x.v.produto.modelo,x.v.rotulo,x.v.tamanho,x.v.tecido||'',
+    x.v.custoTotal.toFixed(2),x.r.preco.toFixed(2),x.r.impostos.icms.toFixed(2),x.r.comissaoRs.toFixed(2),x.r.despesasTotal.toFixed(2),
+    x.r.mc.toFixed(2),x.r.mcPct.toFixed(2)]);
+  return [head,...rows];
+}
+function exportCSV(){
+  const csv=csvRows().map(r=>r.join(';')).join('\n');
+  downloadFile('tabela_precos_artecubica.csv','﻿'+csv,'text/csv');
+}
+function exportExcel(){
+  // Excel abre CSV com separador ; e BOM — export compatível
+  const csv=csvRows().map(r=>r.join(';')).join('\n');
+  downloadFile('tabela_precos_artecubica.xls','﻿'+csv,'application/vnd.ms-excel');
+}
+function downloadFile(name,content,type){
+  const b=new Blob([content],{type});const a=document.createElement('a');
+  a.href=URL.createObjectURL(b);a.download=name;a.click();URL.revokeObjectURL(a.href);
+}
+
+/* ============================================================
+   CONFIGURAÇÕES
+   ============================================================ */
+function perfilNome(key){ const pf=DB.perfis.find(p=>p.key===key); return pf?pf.nome:key; }
+function viewConfig(){
+  const isAdmin = SESSION.role==='admin' || (currentPerfil()||{}).admin;
+  return `<div class="row" style="justify-content:space-between;align-items:center;margin-bottom:16px">
+    <div class="muted" style="font-size:13px">Metas de margem e dados da empresa</div>
+    <button class="btn primary" onclick="salvarConfig()">💾 Salvar configurações</button>
+  </div>
+  <div class="grid g-2">
+    <div class="card"><div class="hd"><h3>Metas de margem</h3></div><div class="bd">
+      <div class="field"><label>Margem-alvo (verde ≥)</label><div class="inp-group"><input class="inp" id="cfgAlvo" value="${DB.margemAlvo}"><span class="suffix">%</span></div></div>
+      <div class="field"><label>Margem mínima aceitável</label><div class="inp-group"><input class="inp" id="cfgMin" value="${DB.margemMin}"><span class="suffix">%</span></div></div>
+    </div></div>
+    <div class="card"><div class="hd"><h3>Empresa & dados</h3></div><div class="bd">
+      <div class="field"><label>Empresa ativa (multi-empresa no sistema final)</label><input class="inp" value="${DB.empresa}" id="cfgEmp"></div>
+      <div class="hint" style="margin-bottom:12px">Cada empresa pode ter parâmetros fiscais independentes.</div>
+      <button class="btn sm danger" onclick="resetDB()">🗑 Limpar todos os dados</button>
+    </div></div>
+  </div>
+  ${isAdmin?`<div class="card" style="margin-top:18px"><div class="hd"><div><h3>☁ Nuvem / Banco de Dados (PostgreSQL)</h3>
+    <div class="desc">Conecte ao servidor para persistir os dados no banco e sincronizar entre dispositivos</div></div>
+    <span class="chip" id="cloudChip2" style="color:${cloudState.connected?'var(--green)':'var(--muted)'}">☁ ${cloudState.connected?'conectado':'offline'}</span></div>
+    <div class="bd"><div class="grid g-3">
+      <div class="field" style="grid-column:span 3"><label>URL da API (backend)</label><input class="inp" id="clUrl" value="${(cloudCfg().url||'').replace(/"/g,'&quot;')}" placeholder="ex.: https://precificador-api.seudominio.com"></div>
+      <div class="field"><label>E-mail (usuário do backend)</label><input class="inp" id="clEmail" value="${(cloudCfg().email||'').replace(/"/g,'&quot;')}" placeholder="admin@artecubica.com.br"></div>
+      <div class="field"><label>Senha (backend)</label><input class="inp" type="password" id="clSenha" value="${(cloudCfg().senha||'').replace(/"/g,'&quot;')}" placeholder="senha do backend"></div>
+      <div class="field"><label>&nbsp;</label><div class="row"><button class="btn primary sm" onclick="salvarCloud()">🔌 Salvar & Conectar</button>
+        <button class="btn sm" onclick="cloudPush(true)">⬆ Enviar agora</button>
+        <button class="btn sm danger" onclick="cloudDisconnect()">Desconectar</button></div></div>
+    </div>
+    <div class="hint">Enquanto não conectado, o app funciona offline (localStorage). Ao conectar, ele carrega os dados do servidor e passa a salvar automaticamente no PostgreSQL. As credenciais do backend são gerenciadas na API (usuário admin do seed).</div>
+    </div></div>`:''}
+
+  <div class="card" style="margin-top:18px"><div class="hd"><div><h3>Usuários</h3>
+    <div class="desc">${DB.usuarios.length} usuário(s)</div></div>
+    ${isAdmin?'<button class="btn primary sm" onclick="openUsuario()">＋ Novo usuário</button>':''}</div>
+    <div class="bd" style="padding:0"><table><thead><tr><th>Nome</th><th>E-mail</th><th>Cargo</th><th>Departamento</th><th>Perfil</th><th>Status</th>${isAdmin?'<th></th>':''}</tr></thead>
+    <tbody>${DB.usuarios.map(u=>`<tr><td><b>${u.nome}</b></td><td class="muted">${u.email}</td><td>${u.cargo||'—'}</td><td>${u.departamento||'—'}</td>
+      <td><span class="badge-lvl">${perfilNome(u.perfil)}</span></td><td><span class="tag ${u.status==='Ativo'?'green':'red'}">${u.status}</span></td>
+      ${isAdmin?`<td style="white-space:nowrap"><button class="btn sm" onclick="openUsuario('${u.id}')">✎</button> <button class="btn sm danger" onclick="excluirUsuario('${u.id}')">🗑</button></td>`:''}</tr>`).join('')}</tbody></table></div></div>
+
+  ${isAdmin?`<div class="card" style="margin-top:18px"><div class="hd"><div><h3>Perfis de acesso</h3>
+    <div class="desc">Crie perfis e defina se podem editar dados</div></div>
+    <button class="btn primary sm" onclick="openPerfil()">＋ Novo perfil</button></div>
+    <div class="bd" style="padding:0"><table><thead><tr><th>Perfil</th><th>Chave</th><th style="text-align:center">Admin</th><th style="text-align:center">Pode editar</th><th>Usuários</th><th></th></tr></thead>
+    <tbody>${DB.perfis.map(pf=>`<tr><td><b>${pf.nome}</b></td><td class="muted">${pf.key}</td>
+      <td style="text-align:center">${pf.admin?'✅':'—'}</td><td style="text-align:center">${pf.editar?'✅':'—'}</td>
+      <td class="muted">${DB.usuarios.filter(u=>u.perfil===pf.key).length}</td>
+      <td style="white-space:nowrap">${pf.key==='admin'?'<span class="muted" style="font-size:11px">fixo</span>':`<button class="btn sm" onclick="openPerfil('${pf.key}')">✎</button> <button class="btn sm danger" onclick="excluirPerfil('${pf.key}')">🗑</button>`}</td></tr>`).join('')}</tbody></table></div></div>
+
+  <div class="card" style="margin-top:18px"><div class="hd"><div><h3>Permissões de menu por perfil</h3>
+    <div class="desc">Marque quais menus cada perfil pode acessar. Perfis Admin veem tudo.</div></div>
+    <button class="btn primary sm" onclick="salvarMenuPerms()">💾 Salvar permissões</button></div>
+    <div class="bd" style="padding:0;overflow:auto"><table><thead><tr><th>Menu</th>${DB.perfis.map(pf=>`<th style="text-align:center">${pf.nome}</th>`).join('')}</tr></thead>
+    <tbody>${MENU_LIST.map(([k,l])=>`<tr><td><b>${l}</b></td>${DB.perfis.map(pf=>`<td style="text-align:center">${pf.admin?'<input type="checkbox" checked disabled title="Admin vê tudo">':`<input type="checkbox" id="mp_${pf.key}_${k}" ${DB.menuPerms[pf.key]&&DB.menuPerms[pf.key][k]?'checked':''}>`}</td>`).join('')}</tr>`).join('')}
+    </tbody></table></div></div>`:''}
+
+  <div class="card" style="margin-top:18px"><div class="hd"><h3>Integrações futuras (APIs preparadas)</h3></div><div class="bd row">
+    ${['Bling','Mercado Livre','Tiny ERP','Omie','SAP','Excel','Google Sheets'].map(x=>`<span class="chip">🔌 ${x}</span>`).join('')}
+  </div></div>`;
+}
+function salvarMetas(){DB.margemAlvo=num(el('cfgAlvo').value);DB.margemMin=num(el('cfgMin').value);save();alert('Metas salvas.');render();}
+function salvarConfig(){
+  DB.margemAlvo=num(el('cfgAlvo').value);
+  DB.margemMin=num(el('cfgMin').value);
+  DB.empresa=el('cfgEmp').value;
+  el('empChip').textContent='🏢 '+DB.empresa;
+  save(); alert('Configurações salvas.'); render();
+}
+function salvarMenuPerms(){
+  DB.perfis.filter(pf=>!pf.admin).forEach(pf=>{ if(!DB.menuPerms[pf.key]) DB.menuPerms[pf.key]={}; MENU_LIST.forEach(([k])=>{ const c=el('mp_'+pf.key+'_'+k); if(c) DB.menuPerms[pf.key][k]=c.checked; }); });
+  save(); applyMenuPerms();
+  DB.historico.push({id:uid(),user:SESSION.nome,acao:'Alteração de permissões de menu',campo:'perfis',ant:'—',novo:'atualizado',data:new Date().toISOString()});
+  alert('Permissões de menu salvas.'); render();
+}
+/* ---------- Cadastro de usuários ---------- */
+function openUsuario(id){
+  const u = id ? DB.usuarios.find(x=>x.id===id) : {nome:'',email:'',senha:'',cargo:'',departamento:'',perfil:(DB.perfis[0]&&DB.perfis[0].key)||'vendedor',status:'Ativo'};
+  const editando=!!id;
+  el('modalRoot').innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
+    <div class="modal-hd"><h3>${editando?'Editar usuário':'Novo usuário'}</h3><button class="btn sm" onclick="closeModal()">✕</button></div>
+    <div class="modal-bd">
+      <div class="grid g-2">
+        <div class="field"><label>Nome</label><input class="inp" id="usNome" value="${(u.nome||'').replace(/"/g,'&quot;')}"></div>
+        <div class="field"><label>E-mail</label><input class="inp" id="usEmail" value="${(u.email||'').replace(/"/g,'&quot;')}"></div>
+      </div>
+      <div class="grid g-2">
+        <div class="field"><label>Senha</label><input class="inp" id="usSenha" value="${(u.senha||'').replace(/"/g,'&quot;')}" placeholder="${editando?'(manter)':'defina uma senha'}"></div>
+        <div class="field"><label>Perfil</label><select class="inp" id="usPerfil">${DB.perfis.map(pf=>`<option value="${pf.key}" ${u.perfil===pf.key?'selected':''}>${pf.nome}</option>`).join('')}</select></div>
+      </div>
+      <div class="grid g-2">
+        <div class="field"><label>Cargo</label><input class="inp" id="usCargo" value="${(u.cargo||'').replace(/"/g,'&quot;')}"></div>
+        <div class="field"><label>Departamento</label><input class="inp" id="usDep" value="${(u.departamento||'').replace(/"/g,'&quot;')}"></div>
+      </div>
+      <div class="field"><label>Status</label><select class="inp" id="usStatus"><option ${u.status==='Ativo'?'selected':''}>Ativo</option><option ${u.status==='Inativo'?'selected':''}>Inativo</option></select></div>
+    </div>
+    <div class="modal-ft"><button class="btn" onclick="closeModal()">Cancelar</button>
+      <button class="btn primary" onclick="salvarUsuario(${id?`'${id}'`:'null'})">Salvar usuário</button></div>
+  </div></div>`;
+}
+function salvarUsuario(id){
+  const nome=el('usNome').value.trim(), email=el('usEmail').value.trim(), senha=el('usSenha').value;
+  if(!nome||!email){ alert('Informe nome e e-mail.'); return; }
+  if(DB.usuarios.some(x=>x.email.toLowerCase()===email.toLowerCase() && x.id!==id)){ alert('Já existe um usuário com esse e-mail.'); return; }
+  const dados={nome,email,cargo:el('usCargo').value.trim(),departamento:el('usDep').value.trim(),perfil:el('usPerfil').value,status:el('usStatus').value};
+  if(id){ const u=DB.usuarios.find(x=>x.id===id); Object.assign(u,dados); if(senha) u.senha=senha; }
+  else { if(!senha){ alert('Defina uma senha.'); return; } DB.usuarios.push({id:uid(),senha,...dados}); }
+  DB.historico.push({id:uid(),user:SESSION.nome,acao:id?'Edição de usuário':'Cadastro de usuário',campo:email,ant:'—',novo:nome,data:new Date().toISOString()});
+  save(); closeModal(); render();
+}
+function excluirUsuario(id){
+  const u=DB.usuarios.find(x=>x.id===id); if(!u) return;
+  if(u.id===SESSION.userId){ alert('Você não pode excluir o próprio usuário logado.'); return; }
+  if(DB.usuarios.filter(x=>x.perfil==='admin' && x.status==='Ativo').length<=1 && u.perfil==='admin'){ alert('Deve existir ao menos um administrador ativo.'); return; }
+  if(!confirm(`Excluir o usuário "${u.nome}"?`)) return;
+  DB.usuarios=DB.usuarios.filter(x=>x.id!==id); save(); render();
+}
+/* ---------- Cadastro de perfis ---------- */
+function slugKey(s){ return (s||'').toLowerCase().normalize('NFD').replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'').slice(0,20)||('perfil_'+uid()); }
+function openPerfil(key){
+  const pf = key ? DB.perfis.find(p=>p.key===key) : {nome:'',admin:false,editar:false};
+  const editando=!!key;
+  el('modalRoot').innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal" style="width:460px">
+    <div class="modal-hd"><h3>${editando?'Editar perfil':'Novo perfil'}</h3><button class="btn sm" onclick="closeModal()">✕</button></div>
+    <div class="modal-bd">
+      <div class="field"><label>Nome do perfil</label><input class="inp" id="pfNome" value="${(pf.nome||'').replace(/"/g,'&quot;')}" placeholder="ex.: Supervisor"></div>
+      <label class="row" style="gap:8px;margin:8px 0"><input type="checkbox" id="pfAdmin" ${pf.admin?'checked':''}> <b>Administrador</b> — vê todos os menus e faz tudo</label>
+      <label class="row" style="gap:8px;margin:8px 0"><input type="checkbox" id="pfEditar" ${pf.editar?'checked':''}> <b>Pode editar dados</b> (cadastrar/alterar/excluir). Desmarcado = somente consulta.</label>
+      <div class="hint">Após criar, defina os menus na matriz de <b>Permissões de menu por perfil</b>.</div>
+    </div>
+    <div class="modal-ft"><button class="btn" onclick="closeModal()">Cancelar</button>
+      <button class="btn primary" onclick="salvarPerfil(${key?`'${key}'`:'null'})">Salvar perfil</button></div>
+  </div></div>`;
+}
+function salvarPerfil(key){
+  const nome=el('pfNome').value.trim(); if(!nome){ alert('Informe o nome do perfil.'); return; }
+  const admin=el('pfAdmin').checked, editar=el('pfEditar').checked;
+  if(key){ const pf=DB.perfis.find(p=>p.key===key); pf.nome=nome; if(key!=='admin'){ pf.admin=admin; pf.editar=editar; } }
+  else {
+    let k=slugKey(nome); while(DB.perfis.some(p=>p.key===k)) k+='_'+uid().slice(0,3);
+    DB.perfis.push({key:k,nome,admin,editar});
+    if(!admin) DB.menuPerms[k]=baseMenuPerms();
+  }
+  save(); closeModal(); render();
+}
+function excluirPerfil(key){
+  if(key==='admin'){ alert('O perfil Administrador é fixo.'); return; }
+  const emUso=DB.usuarios.filter(u=>u.perfil===key);
+  if(emUso.length){ alert(`Há ${emUso.length} usuário(s) com esse perfil. Altere-os antes de excluir.`); return; }
+  const pf=DB.perfis.find(p=>p.key===key);
+  if(!confirm(`Excluir o perfil "${pf?pf.nome:key}"?`)) return;
+  DB.perfis=DB.perfis.filter(p=>p.key!==key); delete DB.menuPerms[key]; save(); render();
+}
+
+/* ---------- permissões ---------- */
+function currentPerfil(){ return DB.perfis.find(pf=>pf.key===SESSION.role); }
+function can(p){ const pf=currentPerfil(); if(!pf) return false; if(pf.admin) return true; if(p==='impostos') return false; if(p==='relatorios') return true; return !!pf.editar; }
+
+/* ---------- Controle de menus por perfil ---------- */
+const MENU_LIST=[['dashboard','Dashboard'],['calc','Precificação'],['simulador','Simulador'],['produtos','Produtos'],['materiaprima','Matéria-Prima'],['engenharia','Engenharia'],['impostos','Impostos & Despesas'],['relatorios','Relatórios'],['config','Configurações']];
+function defaultMenuPerms(){return {
+  gestor:{dashboard:true,calc:true,simulador:true,produtos:true,materiaprima:true,engenharia:true,impostos:false,relatorios:true,config:false},
+  vendedor:{dashboard:true,calc:true,simulador:true,produtos:true,materiaprima:false,engenharia:false,impostos:false,relatorios:true,config:false}
+};}
+function menuAllowed(view){ if(!SESSION) return false; const pf=currentPerfil(); if(pf&&pf.admin) return true; return !!(DB.menuPerms && DB.menuPerms[SESSION.role] && DB.menuPerms[SESSION.role][view]); }
+function firstAllowedView(){ const m=MENU_LIST.find(([k])=>menuAllowed(k)); return m?m[0]:null; }
+function applyMenuPerms(){ if(!SESSION) return; document.querySelectorAll('#nav button[data-view]').forEach(b=>{ b.style.display=menuAllowed(b.dataset.view)?'':'none'; }); }
+function lockView(msg){return `<div class="card"><div class="bd" style="text-align:center;padding:50px">
+  <div style="font-size:40px">🔒</div><h3 style="margin:10px 0">Acesso restrito</h3><p class="muted">${msg}</p></div></div>`;}
+
+/* ============================================================
+   LOGIN / SESSÃO / TEMA
+   ============================================================ */
+function doLogin(){
+  const email=el('lgEmail').value.trim().toLowerCase();
+  const senha=el('lgPass').value;
+  const u=DB.usuarios.find(x=>x.email.toLowerCase()===email);
+  if(!u || u.senha!==senha){ el('lgMsg').textContent='E-mail ou senha inválidos.'; el('lgMsg').style.color='var(--red)'; return; }
+  if(u.status!=='Ativo'){ el('lgMsg').textContent='Usuário inativo.'; el('lgMsg').style.color='var(--red)'; return; }
+  const role = DB.perfis.some(pf=>pf.key===u.perfil) ? u.perfil : 'vendedor';
+  SESSION={role, nome:u.nome, userId:u.id};
+  el('loginScreen').classList.add('hidden');
+  el('appRoot').classList.remove('hidden');
+  const pfNome=(currentPerfil()||{}).nome||role;
+  el('userBox').innerHTML=`<div class="row" style="gap:9px"><div style="width:32px;height:32px;border-radius:50%;background:var(--primary);color:#fff;display:grid;place-items:center;font-weight:700">${SESSION.nome[0]}</div>
+    <div><b style="font-size:12.5px">${SESSION.nome}</b><br><span class="badge-lvl">${pfNome}</span></div></div>`;
+  el('empChip').textContent='🏢 '+DB.empresa;
+  applyMenuPerms();
+  nav(firstAllowedView()||'dashboard');
+}
+function logout(){SESSION=null;el('appRoot').classList.add('hidden');el('loginScreen').classList.remove('hidden');}
+function toggleTheme(){
+  const d=document.documentElement.getAttribute('data-theme')==='dark';
+  document.documentElement.setAttribute('data-theme',d?'light':'dark');
+  el('themeBtn').textContent=d?'🌙 Escuro':'☀ Claro';
+  if(SESSION) render();
+}
+document.getElementById('nav').addEventListener('click',e=>{const b=e.target.closest('button[data-view]');if(b)nav(b.dataset.view);});
+el('lgPass').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
+window.addEventListener('afterprint',()=>document.querySelectorAll('.eng-block').forEach(b=>b.classList.remove('skip-print')));
+// Conecta automaticamente ao servidor, se já configurado
+if(cloudUrl() && cloudCfg().email){ cloudConnect(true); }
+</script>
+</body>
+</html>
