@@ -4,5 +4,8 @@
   "description": "Precificador — 100% Cloudflare (Pages + Functions + PostgreSQL via Hyperdrive)",
   "dependencies": {
     "postgres": "^3.4.4"
-  }
+  },
+    "devDependencies": {
+          "wrangler": "3.114.17"
+    }
 }
