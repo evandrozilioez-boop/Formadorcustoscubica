@@ -8,4 +8,4 @@ pages_build_output_dir = "public"
 # pela Cloudflare, ou Neon/Supabase/RDS) e cole o id abaixo.
 [[hyperdrive]]
 binding = "HYPERDRIVE"
-id = "COLE_O_ID_DO_HYPERDRIVE_AQUI"
+id = "e7d90c77eaea4feeb9b3568abccb02c6"
