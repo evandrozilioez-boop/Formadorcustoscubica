@@ -1,11 +1,13 @@
 name = "formadorcustoscubica"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
-pages_build_output_dir = "public"
+main = "src/index.js"
+
+[assets]
+directory = "public"
+binding = "ASSETS"
 
 # PostgreSQL via Cloudflare Hyperdrive.
-# Crie o Hyperdrive apontando para o seu Postgres (PlanetScale Postgres faturado
-# pela Cloudflare, ou Neon/Supabase/RDS) e cole o id abaixo.
 [[hyperdrive]]
 binding = "HYPERDRIVE"
 id = "e7d90c77eaea4feeb9b3568abccb02c6"
