@@ -1,0 +1,8 @@
+{
+  "name": "precificador-cloudflare",
+  "private": true,
+  "description": "Precificador — 100% Cloudflare (Pages + Functions + PostgreSQL via Hyperdrive)",
+  "dependencies": {
+    "postgres": "^3.4.4"
+  }
+}
