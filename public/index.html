@@ -183,8 +183,8 @@ tbody tr:hover{background:var(--surface-2)}
         <div class="logo">AC</div>
         <div>Precificador Industrial<small>Arte Cúbica · Estofados & Colchões</small></div>
       </div>
-      <div class="field"><label>E-mail</label><input class="inp" id="lgEmail" value=""></div>
-      <div class="field"><label>Senha</label><input class="inp" type="password" id="lgPass" value=""></div>
+      <div class="field"><label>E-mail</label><input class="inp" id="lgEmail" value="admin@artecubica.com.br"></div>
+      <div class="field"><label>Senha</label><input class="inp" type="password" id="lgPass" value="admin"></div>
       <button class="btn primary" style="width:100%;justify-content:center;margin-top:6px" onclick="doLogin()">Entrar</button>
       <p class="hint" id="lgMsg" style="text-align:center;margin-top:12px">Sessão segura (JWT no sistema final)</p>
     </div>
@@ -299,9 +299,32 @@ function cloudUrl(){ return (cloudCfg().url||'').trim().replace(/\/+$/,''); }
 function setCloudStatus(txt,color){ const c=el('cloudChip'); if(c){ c.textContent='☁ '+txt; c.style.color=color||'var(--muted)'; } }
 async function cloudLogin(){
   const cfg=cloudCfg(); const base=cloudUrl(); if(!base) throw new Error('URL não configurada');
-  const res=await fetch(base+'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:cfg.email,senha:cfg.senha})});
-  if(!res.ok) throw new Error('login no servidor falhou');
-  const j=await res.json(); cfg.token=j.accessToken; cloudSetCfg(cfg); return j;
+  let res, j;
+  if(cfg.senha){ // login por credencial (URL/e-mail/senha informados)
+    res=await fetch(base+'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:cfg.email,senha:cfg.senha})});
+    if(!res.ok) throw new Error('login no servidor falhou');
+    j=await res.json();
+  } else { // sessão automática (mesmo domínio / Cloudflare Access)
+    res=await fetch(base+'/api/session');
+    if(!res.ok) throw new Error('sessão automática indisponível');
+    j=await res.json();
+  }
+  cfg.token=j.accessToken; cloudSetCfg(cfg); return j;
+}
+// Tenta conectar automaticamente ao mesmo domínio (Pages Functions), sem configurar nada
+async function cloudAutoStart(){
+  const cfg=cloudCfg();
+  if(cloudUrl() && (cfg.email||cfg.token)){ return cloudConnect(true); } // já configurado antes
+  if(location.protocol!=='http:' && location.protocol!=='https:'){ setCloudStatus('offline'); return; } // aberto como arquivo local
+  try{
+    const base=location.origin.replace(/\/+$/,'');
+    const res=await fetch(base+'/api/session');
+    if(!res.ok) throw new Error();
+    const j=await res.json();
+    cloudSetCfg({url:base, email:(j.usuario&&j.usuario.email)||'auto', senha:'', token:j.accessToken});
+    cloudState.connected=true; setCloudStatus('conectado','var(--green)');
+    await cloudPull();
+  }catch(e){ setCloudStatus('offline'); }
 }
 async function cloudApi(path, opts={}){
   const base=cloudUrl(); const headers=Object.assign({'Content-Type':'application/json'}, opts.headers||{});
@@ -1791,7 +1814,7 @@ document.getElementById('nav').addEventListener('click',e=>{const b=e.target.clo
 el('lgPass').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
 window.addEventListener('afterprint',()=>document.querySelectorAll('.eng-block').forEach(b=>b.classList.remove('skip-print')));
 // Conecta automaticamente ao servidor, se já configurado
-if(cloudUrl() && cloudCfg().email){ cloudConnect(true); }
+cloudAutoStart();
 </script>
 </body>
 </html>

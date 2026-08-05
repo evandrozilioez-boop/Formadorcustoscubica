@@ -47,15 +47,17 @@ Rode o `schema.sql` no banco (console do PlanetScale, ou `psql "<connection-stri
   - **Compatibility flags:** `nodejs_compat`
   - **Bindings → Hyperdrive:** adicione `HYPERDRIVE` apontando para o Hyperdrive criado.
   - **Environment variables (Secrets):**
-    - `AUTH_EMAIL` = e-mail para login na API (ex.: `admin@artecubica.com.br`)
-    - `AUTH_PASSWORD` = senha da API
-    - `JWT_SECRET` = um segredo forte e aleatório
+    - `JWT_SECRET` = um segredo forte e aleatório (obrigatório)
+    - `OPEN_SESSION` = `1` → liga a **conexão automática** (abre e já conecta)
+    - `AUTH_EMAIL` / `AUTH_PASSWORD` = opcionais (só para o login manual por senha)
 
-### 6) Conectar o app ao banco
-Abra o app publicado (`https://SEU-PROJETO.pages.dev`) → **Configurações → ☁ Nuvem / Banco de Dados**:
-- **URL da API:** a própria URL do site (ex.: `https://SEU-PROJETO.pages.dev`)
-- **E-mail / Senha:** os mesmos de `AUTH_EMAIL` / `AUTH_PASSWORD`
-- **Salvar & Conectar** → o indicador ☁ deve ficar "conectado" e os dados passam a ser gravados no PostgreSQL.
+### 6) Conectar — automático (recomendado)
+Com `OPEN_SESSION=1`, **basta abrir** `https://SEU-PROJETO.pages.dev` em qualquer navegador ou dispositivo: o app conecta sozinho ao banco (indicador ☁ = "conectado"), sem configurar nada. É isso que evita ficar "offline" em outro navegador.
+
+> **Segurança:** com `OPEN_SESSION=1`, quem tiver o link consegue ler/gravar os dados — ok para uso interno com link privado. Para proteger de verdade **mantendo o automático**, ative **Cloudflare Access** no projeto Pages e libere só os e-mails da equipe (aí pode até remover `OPEN_SESSION`).
+
+### 6b) Conexão manual (alternativa)
+Sem sessão automática: defina `AUTH_EMAIL`/`AUTH_PASSWORD` e, no app, **Configurações → ☁ Nuvem** → informe a URL do site + esse e-mail/senha → **Salvar & Conectar** (fica salvo por navegador).
 
 ## Observações
 
