@@ -183,8 +183,8 @@ tbody tr:hover{background:var(--surface-2)}
         <div class="logo">AC</div>
         <div>Precificador Industrial<small>Arte Cúbica · Estofados & Colchões</small></div>
       </div>
-      <div class="field"><label>E-mail</label><input class="inp" id="lgEmail" value="admin@artecubica.com.br"></div>
-      <div class="field"><label>Senha</label><input class="inp" type="password" id="lgPass" value="admin"></div>
+      <div class="field"><label>E-mail</label><input class="inp" id="lgEmail" value="" autocomplete="username" placeholder="seu e-mail"></div>
+      <div class="field"><label>Senha</label><input class="inp" type="password" id="lgPass" value="" autocomplete="current-password" placeholder="sua senha"></div>
       <button class="btn primary" style="width:100%;justify-content:center;margin-top:6px" onclick="doLogin()">Entrar</button>
       <p class="hint" id="lgMsg" style="text-align:center;margin-top:12px">Sessão segura (JWT no sistema final)</p>
     </div>
@@ -306,9 +306,13 @@ function cloudIrConectar(){ if(SESSION) nav('config'); }
 
 async function cloudLoginSenha(email, senha){
   const base=cloudUrl(); if(!base) throw new Error('URL não configurada');
-  const res=await fetch(base+'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,senha})});
-  if(!res.ok) throw new Error('e-mail ou senha inválidos');
-  const j=await res.json(); cloudSetToken(j.accessToken); return j;
+  let res;
+  try{ res=await fetch(base+'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,senha})}); }
+  catch(e){ throw new Error('não consegui acessar a API em '+base+' (site no ar?)'); }
+  let j=null; try{ j=await res.json(); }catch(e){ throw new Error('a rota /api não respondeu JSON ('+res.status+') — o Worker/Functions pode não estar publicado'); }
+  if(res.ok && j && j.accessToken){ cloudSetToken(j.accessToken); return j; }
+  if(res.status===401) throw new Error('e-mail ou senha inválidos (confira AUTH_EMAIL/AUTH_PASSWORD no Cloudflare)');
+  throw new Error('login falhou ('+res.status+') '+((j&&j.message)||''));
 }
 async function cloudApi(path, opts={}){
   const base=cloudUrl(); const headers=Object.assign({'Content-Type':'application/json'}, opts.headers||{});
@@ -319,7 +323,7 @@ async function cloudApi(path, opts={}){
 }
 async function cloudPull(){
   const res=await cloudApi('/api/state?chave=default');
-  if(!res.ok) throw new Error('não foi possível ler o estado');
+  if(!res.ok){ let m=''; try{ m=(await res.json()).message||''; }catch(e){} throw new Error('erro ao ler o banco ('+res.status+') '+m); }
   const j=await res.json();
   if(j && j.data){ DB=j.data; ensureDBDefaults(); localStorage.setItem(DB_KEY, JSON.stringify(DB)); if(SESSION) render(); }
   else { await cloudPush(true); } // servidor vazio → sobe o estado local
@@ -1632,7 +1636,7 @@ function viewConfig(){
     <div class="bd"><div class="grid g-3">
       <div class="field" style="grid-column:span 3"><label>URL da API (deixe a do próprio site)</label><input class="inp" id="clUrl" value="${(cloudCfg().url||((location.protocol==='http:'||location.protocol==='https:')?location.origin:'')).replace(/"/g,'&quot;')}" placeholder="https://seu-projeto.pages.dev"></div>
       <div class="field"><label>E-mail</label><input class="inp" id="clEmail" value="${(cloudCfg().email||'').replace(/"/g,'&quot;')}" placeholder="admin@artecubica.com.br"></div>
-      <div class="field"><label>Senha <span class="muted">(não é salva)</span></label><input class="inp" type="password" id="clSenha" value="" autocomplete="off" placeholder="digite para conectar"></div>
+      <div class="field"><label>Senha <span class="muted">(não é salva)</span></label><input class="inp" type="password" id="clSenha" value="" autocomplete="new-password" name="clSenha_${Date.now()}" readonly onfocus="this.removeAttribute('readonly')" placeholder="clique e digite para conectar"></div>
       <div class="field"><label>&nbsp;</label><div class="row"><button class="btn primary sm" onclick="cloudConectar()">🔌 Conectar</button>
         <button class="btn sm" onclick="cloudPush(true)">⬆ Enviar agora</button>
         <button class="btn sm danger" onclick="cloudDisconnect()">Desconectar</button></div></div>
