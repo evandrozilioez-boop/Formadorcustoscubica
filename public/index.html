@@ -205,8 +205,10 @@ tbody tr:hover{background:var(--surface-2)}
       <button data-view="produtos"><span class="ico">▤</span> Produtos</button>
       <button data-view="materiaprima"><span class="ico">🧱</span> Matéria-Prima</button>
       <button data-view="engenharia"><span class="ico">📐</span> Engenharia</button>
-      <button data-view="impostos"><span class="ico">%</span> Impostos & Despesas</button>
+      <button data-view="impostos"><span class="ico">%</span> Markup</button>
+      <button data-view="frete"><span class="ico">🚚</span> Frete</button>
       <div class="sep">Análise</div>
+      <button data-view="tabelapreco"><span class="ico">🏷️</span> Tabela de Preço</button>
       <button data-view="relatorios"><span class="ico">▦</span> Relatórios</button>
       <button data-view="config"><span class="ico">⚙</span> Configurações</button>
     </nav>
@@ -267,8 +269,23 @@ function ensureDBDefaults(){
   DB.menuPerms=DB.menuPerms||defaultMenuPerms();
   DB.perfis=DB.perfis||defaultPerfis();
   DB.usuarios=DB.usuarios||defaultUsuarios();
-  DB.perfis.forEach(pf=>{ if(!pf.admin && !DB.menuPerms[pf.key]) DB.menuPerms[pf.key]=baseMenuPerms(); });
+  DB.perfis.forEach(pf=>{ if(!pf.admin && !DB.menuPerms[pf.key]) DB.menuPerms[pf.key]=baseMenuPerms(); if(!pf.admin && DB.menuPerms[pf.key].tabelapreco===undefined) DB.menuPerms[pf.key].tabelapreco=true; if(!pf.admin && DB.menuPerms[pf.key].frete===undefined) DB.menuPerms[pf.key].frete=(pf.key==='gestor'); });
+  DB.tabelasPreco=DB.tabelasPreco||[];
+  DB.fretes=DB.fretes||[{id:uid(),nome:'FOB (sem frete)',tipo:'FOB',percentual:0}];
+  // Markups: migra a config atual para um markup "Padrão" (permite cadastrar vários)
+  if(!DB.markups || !DB.markups.length){
+    DB.markups=[{id:uid(),nome:'Padrão',taxes:{...DB.taxes},desp:{...DB.desp},comissao:DB.comissao,margemAlvo:DB.margemAlvo,margemMin:DB.margemMin}];
+    DB.markupAtivo=DB.markups[0].id;
+  }
+  if(!DB.markupAtivo || !DB.markups.some(m=>m.id===DB.markupAtivo)) DB.markupAtivo=DB.markups[0].id;
 }
+/* ---------- Markups (composições de impostos/despesas/comissão/margem) ---------- */
+function markupAtivoObj(){ return DB.markups.find(m=>m.id===DB.markupAtivo)||DB.markups[0]; }
+function markupAplicar(mk){ DB.taxes={...mk.taxes}; DB.desp={...mk.desp}; DB.comissao=mk.comissao; DB.margemAlvo=mk.margemAlvo; DB.margemMin=mk.margemMin; }
+function markupAtivar(id){ DB.markupAtivo=id; markupAplicar(markupAtivoObj()); save(); render(); }
+function markupNovo(){ const nome=prompt('Nome do novo markup (ex.: Marketplace, Atacado):',''); if(nome===null) return; const base=markupAtivoObj(); const mk={id:uid(),nome:(nome.trim()||('Markup '+(DB.markups.length+1))),taxes:{...base.taxes},desp:{...base.desp},comissao:base.comissao,margemAlvo:base.margemAlvo,margemMin:base.margemMin}; DB.markups.push(mk); DB.markupAtivo=mk.id; markupAplicar(mk); save(); render(); }
+function markupRenomear(){ const mk=markupAtivoObj(); const nome=prompt('Renomear markup:',mk.nome); if(nome===null) return; mk.nome=nome.trim()||mk.nome; save(); render(); }
+function markupExcluir(){ if(DB.markups.length<=1){ alert('Deve existir ao menos um markup.'); return; } const mk=markupAtivoObj(); if(!confirm('Excluir o markup "'+mk.nome+'"?')) return; DB.markups=DB.markups.filter(m=>m.id!==mk.id); DB.markupAtivo=DB.markups[0].id; markupAplicar(markupAtivoObj()); save(); render(); }
 function defaultPerfis(){ return [
   {key:'admin',nome:'Administrador',admin:true,editar:true},
   {key:'gestor',nome:'Gestor',admin:false,editar:true},
@@ -279,7 +296,7 @@ function defaultUsuarios(){ return [
   {id:uid(),nome:'Gestor Comercial',email:'gestor@artecubica.com.br',senha:'123456',cargo:'Comercial',departamento:'Comercial',perfil:'gestor',status:'Ativo'},
   {id:uid(),nome:'Vendedor Loja 1',email:'vendedor@artecubica.com.br',senha:'123456',cargo:'Vendas',departamento:'Vendas',perfil:'vendedor',status:'Ativo'}
 ];}
-function baseMenuPerms(){ return {dashboard:true,calc:true,simulador:true,produtos:true,materiaprima:false,engenharia:false,impostos:false,relatorios:true,config:false}; }
+function baseMenuPerms(){ return {dashboard:true,calc:true,simulador:true,produtos:true,materiaprima:false,engenharia:false,impostos:false,frete:false,tabelapreco:true,relatorios:true,config:false}; }
 function load(){
   try{ const raw = localStorage.getItem(DB_KEY); if(raw){ const d=JSON.parse(raw); d.materiais=d.materiais||[]; d.engenharias=d.engenharias||[]; d.menuPerms=d.menuPerms||defaultMenuPerms(); return d; } }catch(e){}
   const seed = JSON.parse(JSON.stringify(DEFAULTS));
@@ -470,8 +487,10 @@ const VIEW_META = {
   simulador:['Simulador','Ajuste parâmetros e veja o impacto instantâneo'],
   produtos:['Produtos','Cadastro de sofás e colchões e suas variações'],
   materiaprima:['Matéria-Prima','Cadastro de insumos · importação via Excel/CSV'],
+  impostos:['Markup','Cadastre markups (impostos, comissão, despesas e margem) para análises diferentes'],
+  tabelapreco:['Tabela de Preço','Preços por produto (tamanho × tecido) · markup e frete'],
+  frete:['Frete','Cadastro de fretes (CIF/FOB) e percentuais'],
   engenharia:['Engenharia','Ficha técnica por blocos · impressão por folha'],
-  impostos:['Impostos & Despesas','Parâmetros fiscais e despesas variáveis (Lucro Real)'],
   relatorios:['Relatórios','Análises e exportação (Excel · PDF · CSV)'],
   config:['Configurações','Usuários, empresa, metas e histórico']
 };
@@ -493,7 +512,7 @@ function render(){
   const c = el('content');
   if(!SESSION){return;}
   c.innerHTML = ({dashboard:viewDashboard, calc:viewCalc, simulador:viewSimulador,
-    produtos:viewProdutos, materiaprima:viewMateriaPrima, engenharia:viewEngenharia, impostos:viewImpostos, relatorios:viewRelatorios, config:viewConfig}[currentView])();
+    produtos:viewProdutos, materiaprima:viewMateriaPrima, engenharia:viewEngenharia, impostos:viewImpostos, frete:viewFrete, tabelapreco:viewTabelaPreco, relatorios:viewRelatorios, config:viewConfig}[currentView])();
   if(currentView==='calc') initCalc();
   if(currentView==='simulador') initSim();
 }
@@ -596,7 +615,9 @@ function viewCalc(){
   return `
   <div class="card" style="margin-bottom:18px"><div class="bd">
     <div class="row" style="justify-content:space-between;align-items:flex-end;gap:20px;flex-wrap:wrap">
-      <div class="field" style="margin:0;min-width:230px;flex:1">
+      <div class="field" style="margin:0;min-width:180px"><label>Markup (análise)</label>
+        <select class="inp" onchange="markupAtivar(this.value)">${DB.markups.map(m=>`<option value="${m.id}" ${m.id===DB.markupAtivo?'selected':''}>${m.nome}</option>`).join('')}</select></div>
+      <div class="field" style="margin:0;min-width:200px;flex:1">
         <label>Margem de contribuição alvo: <b id="calMargemLbl">${pct(DB.margemAlvo)}</b></label>
         <input type="range" class="slider" id="calMargem" min="0" max="60" step="0.5" value="${DB.margemAlvo}" oninput="el('calMargemLbl').textContent=this.value+'%';calcRerender()">
       </div>
@@ -1584,31 +1605,134 @@ function viewImpostos(){
   const DL={freteVenda:'Frete de venda',marketplace:'Marketplace',bonificacoes:'Bonificações',descontos:'Descontos comerciais',marketing:'Marketing',outras:'Outras despesas'};
   const somaImp=Object.values(DB.taxes).reduce((a,b)=>a+b,0);
   const somaDesp=Object.values(DB.desp).reduce((a,b)=>a+b,0);
-  return `<div class="grid g-2">
-    <div class="card"><div class="hd"><div><h3>Impostos (Lucro Real)</h3><div class="desc">Cada alíquota é configurável — total ${pct(somaImp)}</div></div></div>
+  const mk=markupAtivoObj();
+  const somaTot=somaImp+somaDesp+num(DB.comissao)+num(DB.margemAlvo);
+  return `<div class="card" style="margin-bottom:18px"><div class="bd row" style="justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-end">
+    <div class="field" style="margin:0;min-width:280px"><label>Markup ativo (usado na Precificação, Simulador e Relatórios)</label>
+      <select class="inp" onchange="markupAtivar(this.value)">${DB.markups.map(m=>`<option value="${m.id}" ${m.id===DB.markupAtivo?'selected':''}>${m.nome}</option>`).join('')}</select></div>
+    <div class="row">
+      <button class="btn sm" onclick="markupNovo()">＋ Novo markup</button>
+      <button class="btn sm" onclick="markupRenomear()">✎ Renomear</button>
+      <button class="btn sm danger" onclick="markupExcluir()">🗑 Excluir</button>
+    </div>
+  </div></div>
+  <div class="grid g-2">
+    <div class="card"><div class="hd"><div><h3>Impostos (Lucro Real)</h3><div class="desc">Total ${pct(somaImp)}</div></div></div>
       <div class="bd"><div class="grid g-2">
       ${Object.entries(TL).map(([k,l])=>`<div class="field"><label>${l}</label><div class="inp-group">
         <input class="inp" id="gt_${k}" value="${DB.taxes[k]}"><span class="suffix">%</span></div></div>`).join('')}
       </div></div></div>
-    <div class="card"><div class="hd"><div><h3>Despesas variáveis & comissão</h3><div class="desc">Total despesas ${pct(somaDesp)} · comissão ${pct(DB.comissao)}</div></div></div>
+    <div class="card"><div class="hd"><div><h3>Despesas variáveis & comissão</h3><div class="desc">Despesas ${pct(somaDesp)} · comissão ${pct(DB.comissao)}</div></div></div>
       <div class="bd"><div class="field"><label>Comissão</label><div class="inp-group"><input class="inp" id="gcom" value="${DB.comissao}"><span class="suffix">%</span></div></div>
       <div class="grid g-2">
       ${Object.entries(DL).map(([k,l])=>`<div class="field"><label>${l}</label><div class="inp-group">
         <input class="inp" id="gd_${k}" value="${DB.desp[k]}"><span class="suffix">%</span></div></div>`).join('')}
       </div></div></div>
   </div>
+  <div class="card" style="margin-top:18px"><div class="hd"><div><h3>Margem de contribuição (metas)</h3><div class="desc">Σ variáveis + margem = ${pct(somaTot)} · divisor do preço = ${pct(100-somaTot)}</div></div></div>
+    <div class="bd"><div class="grid g-2">
+      <div class="field"><label>Margem alvo (verde ≥)</label><div class="inp-group"><input class="inp" id="gMargAlvo" value="${DB.margemAlvo}"><span class="suffix">%</span></div></div>
+      <div class="field"><label>Margem mínima aceitável</label><div class="inp-group"><input class="inp" id="gMargMin" value="${DB.margemMin}"><span class="suffix">%</span></div></div>
+    </div></div></div>
   <div class="card" style="margin-top:18px"><div class="bd row" style="justify-content:space-between">
-    <div class="muted">Alterações registram no histórico com usuário, data e valores anterior/novo.</div>
-    <button class="btn primary" onclick="salvarImpostos()">💾 Salvar parâmetros</button></div></div>`;
+    <div class="muted">Salva no markup <b>"${mk.nome}"</b>. Alterações de imposto ficam no histórico.</div>
+    <button class="btn primary" onclick="salvarImpostos()">💾 Salvar markup "${mk.nome}"</button></div></div>`;
 }
 function salvarImpostos(){
-  const antes=JSON.stringify({t:DB.taxes,d:DB.desp,c:DB.comissao});
   ['icms','pis','cofins','ipi','irpj','csll','iss','outros'].forEach(k=>{const nv=num(el('gt_'+k).value);
-    if(nv!==DB.taxes[k]) DB.historico.push({id:uid(),user:SESSION.nome,acao:'Alteração de imposto',campo:k.toUpperCase(),ant:DB.taxes[k]+'%',novo:nv+'%',data:new Date().toISOString()});
+    if(nv!==DB.taxes[k]) DB.historico.push({id:uid(),user:SESSION.nome,acao:'Alteração de imposto (markup)',campo:k.toUpperCase(),ant:DB.taxes[k]+'%',novo:nv+'%',data:new Date().toISOString()});
     DB.taxes[k]=nv;});
   ['freteVenda','marketplace','bonificacoes','descontos','marketing','outras'].forEach(k=>DB.desp[k]=num(el('gd_'+k).value));
   DB.comissao=num(el('gcom').value);
-  save();alert('Parâmetros fiscais atualizados.');render();
+  DB.margemAlvo=num(el('gMargAlvo').value); DB.margemMin=num(el('gMargMin').value);
+  // grava no markup ativo
+  const mk=markupAtivoObj(); mk.taxes={...DB.taxes}; mk.desp={...DB.desp}; mk.comissao=DB.comissao; mk.margemAlvo=DB.margemAlvo; mk.margemMin=DB.margemMin;
+  save();alert('Markup "'+mk.nome+'" salvo.');render();
+}
+
+/* ============================================================
+   TABELA DE PREÇO (matriz tamanho × tecido · markup · frete CIF/FOB)
+   ============================================================ */
+/* ---------- Frete (cadastro) ---------- */
+let freteEdit=null;
+function freteById(id){ return (DB.fretes||[]).find(f=>f.id===id); }
+function fretePct(id){ const f=freteById(id); return f?num(f.percentual):0; }
+function viewFrete(){
+  const editavel=can('editar');
+  return `
+  ${editavel?`<div class="card" style="margin-bottom:18px"><div class="hd"><div><h3 id="frFormTitle">Novo frete</h3><div class="desc">Cadastre CIF (com %) ou FOB (sem frete)</div></div></div>
+    <div class="bd"><div class="grid g-4">
+      <div class="field" style="grid-column:span 2"><label>Nome</label><input class="inp" id="frNome" placeholder="ex.: CIF Sudeste"></div>
+      <div class="field"><label>Tipo</label><select class="inp" id="frTipo"><option>CIF</option><option>FOB</option></select></div>
+      <div class="field"><label>Percentual</label><div class="inp-group"><input class="inp" id="frPct" placeholder="0,00"><span class="suffix">%</span></div></div>
+    </div>
+    <div class="row" style="margin-top:6px"><button class="btn primary sm" onclick="salvarFrete()">💾 Salvar</button>
+      <button class="btn sm" onclick="freteEdit=null;render()">Limpar</button>
+      <span class="hint">O percentual é somado ao preço na Tabela de Preço. FOB normalmente é 0%.</span></div>
+    </div></div>`:''}
+  <div class="card"><div class="hd"><div><h3>Fretes cadastrados</h3><div class="desc">${(DB.fretes||[]).length} frete(s)</div></div></div>
+    <div class="bd" style="padding:0"><table><thead><tr><th>Nome</th><th>Tipo</th><th>Percentual</th>${editavel?'<th></th>':''}</tr></thead>
+    <tbody>${(DB.fretes||[]).map(f=>`<tr><td><b>${f.nome}</b></td><td><span class="tag ${f.tipo==='CIF'?'amber':'blue'}">${f.tipo}</span></td><td>${pct(num(f.percentual))}</td>
+      ${editavel?`<td style="white-space:nowrap"><button class="btn sm" onclick="editarFrete('${f.id}')">✎</button> <button class="btn sm danger" onclick="excluirFrete('${f.id}')">🗑</button></td>`:''}</tr>`).join('')||`<tr><td colspan="${editavel?4:3}" class="muted" style="padding:20px;text-align:center">Nenhum frete cadastrado.</td></tr>`}</tbody></table></div></div>`;
+}
+function salvarFrete(){
+  const nome=el('frNome').value.trim(); if(!nome){ alert('Informe o nome do frete.'); return; }
+  const reg={nome,tipo:el('frTipo').value,percentual:num(el('frPct').value)};
+  if(freteEdit){ const f=freteById(freteEdit); Object.assign(f,reg); freteEdit=null; }
+  else { DB.fretes.push({id:uid(),...reg}); }
+  save(); render();
+}
+function editarFrete(id){ const f=freteById(id); if(!f) return; freteEdit=id; el('frNome').value=f.nome; el('frTipo').value=f.tipo; el('frPct').value=num(f.percentual); el('frFormTitle').textContent='Editar: '+f.nome; window.scrollTo({top:0,behavior:'smooth'}); }
+function excluirFrete(id){ const f=freteById(id); if(!f) return; if(!confirm('Excluir o frete "'+f.nome+'"?')) return; DB.fretes=DB.fretes.filter(x=>x.id!==id); save(); render(); }
+
+/* ---------- Tabela de Preço ---------- */
+let tpCfg=null;
+const TP_CORES=['rgba(22,163,74,.14)','rgba(217,119,6,.14)','rgba(59,91,219,.14)','rgba(202,138,4,.16)','rgba(14,165,233,.14)','rgba(0,0,0,.06)'];
+function tpCor(i){ return TP_CORES[i%TP_CORES.length]; }
+function precoTabela(custo, mk, freteCifPct){
+  const desp={...mk.desp}; if(num(freteCifPct)>0) desp.freteCif=num(freteCifPct);
+  return precificar({custo, taxes:mk.taxes, desp, comissao:mk.comissao, margem:mk.margemAlvo});
+}
+function tpSet(k,v){ if(!tpCfg) return; tpCfg[k]=v; render(); }
+function viewTabelaPreco(){
+  if(!tpCfg) tpCfg={markupId:DB.markupAtivo, freteId:(DB.fretes[0]&&DB.fretes[0].id)};
+  if(!DB.markups.some(m=>m.id===tpCfg.markupId)) tpCfg.markupId=DB.markupAtivo;
+  if(!freteById(tpCfg.freteId)) tpCfg.freteId=(DB.fretes[0]&&DB.fretes[0].id);
+  const mk=DB.markups.find(m=>m.id===tpCfg.markupId)||markupAtivoObj();
+  const editavel=can('editar');
+  const fr=freteById(tpCfg.freteId); const freteLbl=fr?`${fr.nome} (${fr.tipo} ${pct(num(fr.percentual))})`:'—';
+  const frete = fretePct(tpCfg.freteId);
+  let h=`<div class="card no-print" style="margin-bottom:16px"><div class="bd">
+    <div class="row" style="gap:14px;flex-wrap:wrap;align-items:flex-end">
+      <div class="field" style="margin:0;min-width:200px"><label>Markup</label><select class="inp" onchange="tpSet('markupId',this.value)">${DB.markups.map(m=>`<option value="${m.id}" ${m.id===tpCfg.markupId?'selected':''}>${m.nome}</option>`).join('')}</select></div>
+      <div class="field" style="margin:0;min-width:240px"><label>Frete</label><select class="inp" onchange="tpSet('freteId',this.value)">${DB.fretes.map(f=>`<option value="${f.id}" ${f.id===tpCfg.freteId?'selected':''}>${f.nome} · ${f.tipo} ${pct(num(f.percentual))}</option>`).join('')}</select></div>
+      <button class="btn sm" onclick="window.print()">🖨 Imprimir</button>
+      <span class="hint">Altere o markup ou o frete e a tabela atualiza na hora.</span>
+    </div>
+  </div></div>`;
+  h+=`<div class="print-only" style="margin-bottom:10px"><h2 style="font-size:16px">Tabela de Preço — ${DB.empresa}</h2><div class="muted">Markup: ${mk.nome} · Frete: ${freteLbl} · ${new Date().toLocaleDateString('pt-BR')}</div></div>`;
+  if(!DB.produtos.length){ return h+`<div class="card"><div class="bd muted" style="padding:24px">Cadastre produtos para gerar a tabela de preço.</div></div>`; }
+  DB.produtos.forEach(p=>{
+    const tamanhos=[...new Set(p.variacoes.map(v=>v.tamanho))];
+    const tecidos=[...new Set(p.variacoes.map(v=>v.tecido).filter(t=>t&&t!=='—'))];
+    h+=`<div class="card" style="margin-bottom:16px"><div class="hd"><div class="row" style="gap:12px;align-items:center;min-width:0">
+      ${p.imagem?`<img src="${p.imagem}" class="prod-thumb">`:''}
+      <div style="min-width:0"><h3>${p.modelo} <span class="tag blue">${p.codigo}</span></h3><div class="desc">${mk.nome} · ${freteLbl}</div></div>
+    </div></div><div class="bd" style="padding:0;overflow:auto">`;
+    if(tecidos.length){
+      h+=`<table><thead><tr><th>Tamanho</th>${tecidos.map((t,ci)=>`<th style="text-align:center;background:${tpCor(ci)};-webkit-print-color-adjust:exact;print-color-adjust:exact">Tecido ${t}</th>`).join('')}</tr></thead><tbody>`;
+      tamanhos.forEach(tz=>{
+        h+=`<tr><td><b>${tz}</b></td>${tecidos.map((tc,ci)=>{ const v=p.variacoes.find(x=>x.tamanho===tz&&x.tecido===tc); const bg=`background:${tpCor(ci)};-webkit-print-color-adjust:exact;print-color-adjust:exact`; if(!v) return `<td class="muted" style="text-align:center;${bg}">—</td>`; const r=precoTabela(num(v.custoTotal),mk,frete); return `<td style="text-align:center;font-weight:700;${bg}">${money(r.preco)}</td>`; }).join('')}</tr>`;
+      });
+      h+=`</tbody></table>`;
+    } else {
+      h+=`<table><thead><tr><th>Medida</th><th>Dimensões</th><th style="text-align:right">Preço de venda</th></tr></thead><tbody>`;
+      p.variacoes.forEach(v=>{ const r=precoTabela(num(v.custoTotal),mk,frete); h+=`<tr><td><b>${v.tamanho}</b></td><td class="muted">${v.medida||'—'}</td><td style="text-align:right;font-weight:700">${money(r.preco)}</td></tr>`; });
+      h+=`</tbody></table>`;
+    }
+    h+=`</div></div>`;
+  });
+  return h;
 }
 
 /* ============================================================
@@ -1829,10 +1953,10 @@ function currentPerfil(){ return DB.perfis.find(pf=>pf.key===SESSION.role); }
 function can(p){ const pf=currentPerfil(); if(!pf) return false; if(pf.admin) return true; if(p==='impostos') return false; if(p==='relatorios') return true; return !!pf.editar; }
 
 /* ---------- Controle de menus por perfil ---------- */
-const MENU_LIST=[['dashboard','Dashboard'],['calc','Precificação'],['simulador','Simulador'],['produtos','Produtos'],['materiaprima','Matéria-Prima'],['engenharia','Engenharia'],['impostos','Impostos & Despesas'],['relatorios','Relatórios'],['config','Configurações']];
+const MENU_LIST=[['dashboard','Dashboard'],['calc','Precificação'],['simulador','Simulador'],['produtos','Produtos'],['materiaprima','Matéria-Prima'],['engenharia','Engenharia'],['impostos','Markup'],['frete','Frete'],['tabelapreco','Tabela de Preço'],['relatorios','Relatórios'],['config','Configurações']];
 function defaultMenuPerms(){return {
-  gestor:{dashboard:true,calc:true,simulador:true,produtos:true,materiaprima:true,engenharia:true,impostos:false,relatorios:true,config:false},
-  vendedor:{dashboard:true,calc:true,simulador:true,produtos:true,materiaprima:false,engenharia:false,impostos:false,relatorios:true,config:false}
+  gestor:{dashboard:true,calc:true,simulador:true,produtos:true,materiaprima:true,engenharia:true,impostos:false,frete:true,tabelapreco:true,relatorios:true,config:false},
+  vendedor:{dashboard:true,calc:true,simulador:true,produtos:true,materiaprima:false,engenharia:false,impostos:false,frete:false,tabelapreco:true,relatorios:true,config:false}
 };}
 function menuAllowed(view){ if(!SESSION) return false; const pf=currentPerfil(); if(pf&&pf.admin) return true; return !!(DB.menuPerms && DB.menuPerms[SESSION.role] && DB.menuPerms[SESSION.role][view]); }
 function firstAllowedView(){ const m=MENU_LIST.find(([k])=>menuAllowed(k)); return m?m[0]:null; }
