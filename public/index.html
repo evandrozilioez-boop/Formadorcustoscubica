@@ -1036,11 +1036,13 @@ const QTD_KEY={madeira:'quant1',espumas:'quant',papelao:'quant',ziper:'quant',fi
 function ziperTotal(r){ return (r.tipo==='Cursor') ? num(r.quant) : num(r.quant)*num(r.comp); }
 function fibraSilicSoma(r){ let s=0; for(let k=1;k<=6;k++) s+=num(r['alm'+k]); return s; }
 function rowQuant(key,r){
+  if(key==='madeira') return num(r.compr)*num(r.larg)*num(r.esp)*num(r.quant1); // M² = compr × larg × esp × quant
+  if(key==='espumas') return num(r.compr)*num(r.larg)*num(r.esp)*num(r.quant);   // M² = compr × larg × esp × quant
   if(key==='papelao') return num(r.compr)*num(r.larg)*num(r.quant); // Total de Chapa = compr × larg × quant
-  if(key==='ziper') return ziperTotal(r); // Cursor = só quantidade; demais = quant × comprimento
+  if(key==='ziper') return ziperTotal(r); // Total: Cursor = só quantidade; demais = quant × comprimento
   if(key==='fibraManta'||key==='mantaExpandida') return num(r.comp)*num(r.larg)*num(r.quant); // M² = comp × larg × quant
   if(key==='fibraSilic') return fibraSilicSoma(r); // Peso Total = soma das almofadas
-  return num(r[QTD_KEY[key]]);
+  return num(r[QTD_KEY[key]]); // kitPes, embalagem, percinta = Quant. · tnt = Qtd.(ploter) · acessorios = Quantidade
 }
 const ENG_IDENT=[['tamanho','Tamanho'],['pedido','Pedido'],['lote','Lote'],['revpor','Revisão por'],['criacao','Criação'],['ultrev','Última revisão']];
 const ENG_BASE=ENG_BLOCOS.filter(b=>b.key!=='tecido'); // blocos da composição (sem tecido)
@@ -1064,7 +1066,8 @@ function matPreco(id){ const m=id?matById(id):null; if(!m) return 0; const p=num
 function itemCusto(key,r){ return rowQuant(key,r)*matPreco(r.materialId); }
 function blocoSubtotal(eng,key){ return engBlock(eng,key).reduce((a,r)=>a+itemCusto(key,r),0); }
 function engVisivel(eng,key){ return !(eng.ocultos && eng.ocultos.includes(key)); }
-function custoBase(eng){ return ENG_BASE.reduce((a,b)=> a + (engVisivel(eng,b.key)?blocoSubtotal(eng,b.key):0), 0); }
+// Custo base = soma da coluna "Custo total" da Matéria-prima consolidada (blocos, sem tecido)
+function custoBase(eng){ return engMateriaisResumo(eng).filter(m=>!m.tecido).reduce((a,m)=>a+m.custoTotal,0); }
 function tecidoCusto(t){ return num(t.consumo)*matPreco(t.materialId); }
 /* ---- gera fichas por tamanho a partir do produto (SKU) ---- */
 function engEnsureFichas(pid){
@@ -1138,7 +1141,7 @@ function viewEngenharia(){
 }
 function engCellFor(eng,blk,r,i,c,editavel){
   const key=blk.key;
-  if(c[0]==='quantPed') return `<td class="eng-tot" id="engqp_${key}_${i}" style="font-weight:700" title="Quant. × Pedido">${fmtQtd(rowQuant(key,r)*num(eng.pedido))}</td>`;
+  if(c[0]==='quantPed') return `<td class="eng-tot" id="engqp_${key}_${i}" style="font-weight:700" title="Quant. × Pedido">${fmtQtd(num(r[QTD_KEY[key]])*num(eng.pedido))}</td>`;
   if(c[0]==='totChapa') return `<td class="eng-tot" id="engtch_${key}_${i}" style="font-weight:700" title="Compr. × Larg. × Quant.">${fmtQtd(num(r.compr)*num(r.larg)*num(r.quant))}</td>`;
   if(c[0]==='total' && key==='ziper') return `<td class="eng-tot" id="engttl_${key}_${i}" style="font-weight:700" title="Cursor: só quantidade · demais: Quant. × Comp.">${fmtQtd(ziperTotal(r))}</td>`;
   if(c[0]==='tipo' && key==='ziper') return `<td><select class="inp" onchange="onEngEdit('ziper',${i},'tipo',this)" ${editavel?'':'disabled'}>${['Zíper','Cursor','Velcro'].map(o=>`<option ${((r.tipo||'Zíper')===o)?'selected':''}>${o}</option>`).join('')}</select></td>`;
@@ -1221,16 +1224,27 @@ function engMateriaisResumo(eng){
   ENG_BASE.filter(b=>engVisivel(eng,b.key)).forEach(b=>{
     engBlock(eng,b.key).forEach(r=>{
       const cod=(r.materialCod||'').trim(); if(!cod) return;
-      if(!map[cod]){ const m=matById(r.materialId)||DB.materiais.find(x=>x.codigo.toLowerCase()===cod.toLowerCase()); map[cod]={cod,descricao:m?m.descricao:'',unidade:m?(m.unidade||''):'',qtd:0}; }
-      map[cod].qtd += rowQuant(b.key,r)*num(eng.pedido);
+      if(!map[cod]){ const m=matById(r.materialId)||DB.materiais.find(x=>x.codigo.toLowerCase()===cod.toLowerCase()); map[cod]={cod,descricao:m?m.descricao:'',unidade:m?(m.unidade||''):'',qtd:0,custoUnit:m?matPreco(m.id):0}; }
+      map[cod].qtd += rowQuant(b.key,r);
     });
   });
-  return Object.values(map).sort((a,b)=>a.cod.localeCompare(b.cod));
+  // Tecido (variações): anotação de consumo — soma o consumo de cada classe (não entra no custo base)
+  (eng.tecidos||[]).forEach(t=>{
+    const cod=(t.materialCod||'').trim(); if(!cod) return;
+    if(!map[cod]){ const m=matById(t.materialId)||DB.materiais.find(x=>x.codigo.toLowerCase()===cod.toLowerCase()); map[cod]={cod,descricao:m?m.descricao:'',unidade:m?(m.unidade||''):'',qtd:0,custoUnit:m?matPreco(m.id):0,tecido:true}; }
+    map[cod].qtd += num(t.consumo);
+  });
+  const arr=Object.values(map).sort((a,b)=>a.cod.localeCompare(b.cod));
+  arr.forEach(m=>{ m.custoTotal=m.qtd*m.custoUnit; });
+  return arr;
 }
 function engMateriaisTabelaInner(eng){
   const mats=engMateriaisResumo(eng);
-  return `<div style="overflow:auto"><table><thead><tr><th>Cód. matéria-prima</th><th>Descrição</th><th>Unid.</th><th>Quantidade somada</th></tr></thead>
-    <tbody>${mats.map(m=>`<tr><td><b>${m.cod}</b></td><td>${m.descricao||'—'}</td><td class="muted">${m.unidade||'—'}</td><td class="eng-tot" style="font-weight:700">${fmtQtd(m.qtd)}</td></tr>`).join('')||`<tr><td colspan="4" class="muted" style="padding:12px">Vincule matérias-primas nos blocos para consolidar aqui.</td></tr>`}</tbody></table></div>`;
+  const totalGeral=mats.filter(m=>!m.tecido).reduce((a,m)=>a+m.custoTotal,0);
+  return `<div style="overflow:auto"><table><thead><tr><th>Cód. matéria-prima</th><th>Descrição</th><th>Unid.</th><th>Quantidade somada</th><th>Custo unit.</th><th>Custo total</th></tr></thead>
+    <tbody>${mats.map(m=>`<tr><td><b>${m.cod}</b></td><td>${m.descricao||'—'}${m.tecido?' <span class="tag blue" style="font-size:10px">tecido (consumo)</span>':''}</td><td class="muted">${m.unidade||'—'}</td><td class="eng-tot">${fmtQtd(m.qtd)}</td><td class="eng-tot">${money(m.custoUnit)}</td><td class="eng-tot" style="font-weight:700">${m.tecido?'<span class="muted">anotação</span>':money(m.custoTotal)}</td></tr>`).join('')||`<tr><td colspan="6" class="muted" style="padding:12px">Vincule matérias-primas nos blocos para consolidar aqui.</td></tr>`}</tbody>
+    ${mats.length?`<tfoot><tr><td colspan="5" style="text-align:right;font-weight:700">Total geral (= custo base)</td><td class="eng-tot" style="font-weight:800;color:var(--primary)">${money(totalGeral)}</td></tr></tfoot>`:''}
+    </table></div>`;
 }
 function engMateriaisCard(eng){
   return `<div class="card eng-block" id="engblock_materiais" style="margin-bottom:18px">
@@ -1346,7 +1360,7 @@ function engField(f,v){ const eng=engCurrent(); if(!eng) return; eng[f]=v;
   if(f!=='lote' && f!=='pedido' && f!=='revpor' && f!=='ultrev' && f!=='criacao') engTocarRevisao(eng);
   save();
   document.querySelectorAll('.engprinthead').forEach(x=>x.textContent=engHeadLine(eng));
-  if(f==='pedido'){ ENG_BASE.forEach(b=>{ if(b.cols.some(c=>c[0]==='quantPed')) engBlock(eng,b.key).forEach((r,i)=>{ const qp=el('engqp_'+b.key+'_'+i); if(qp) qp.textContent=fmtQtd(rowQuant(b.key,r)*num(v)); }); }); engRecalc(); } }
+  if(f==='pedido'){ ENG_BASE.forEach(b=>{ if(b.cols.some(c=>c[0]==='quantPed')) engBlock(eng,b.key).forEach((r,i)=>{ const qp=el('engqp_'+b.key+'_'+i); if(qp) qp.textContent=fmtQtd(num(r[QTD_KEY[b.key]])*num(v)); }); }); engRecalc(); } }
 function engAddRow(key){ const eng=engCurrent(); const blk=ENG_BLOCOS.find(b=>b.key===key); const o={}; blk.cols.forEach(c=>o[c[0]]=''); o.materialCod=''; o.materialId=null;
   const arr=engBlock(eng,key);
   if((key==='madeira'||key==='espumas') && arr.length){ const prev=arr[arr.length-1]; o.materialCod=prev.materialCod||''; o.materialId=prev.materialId||null; }
