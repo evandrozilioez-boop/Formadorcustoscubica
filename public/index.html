@@ -356,23 +356,21 @@ async function cloudConectar(){
     render();
   }catch(e){ cloudState.connected=false; setCloudStatus('offline','var(--red)'); alert('Falha ao conectar: '+e.message); }
 }
-// No início: conecta sozinho (sem precisar clicar). Requer OPEN_SESSION=1 (ou Cloudflare Access) no servidor.
+// No início: conecta sozinho (sem precisar clicar).
 async function cloudAutoStart(){
   cloudSetCfg(cloudCfg()); // limpa qualquer senha salva por versões antigas
-  // 1) já existe token nesta sessão do navegador?
-  if(cloudGetToken()){
-    try{ await cloudPull(); cloudState.connected=true; setCloudStatus('conectado','var(--green)'); return; }
-    catch(e){ cloudSetToken(''); }
-  }
-  // 2) conexão automática no mesmo domínio
   const base=cloudUrl();
-  if(base && (location.protocol==='http:'||location.protocol==='https:')){
-    try{
+  if(!base || !(location.protocol==='http:'||location.protocol==='https:')){ setCloudStatus('offline'); return; }
+  try{
+    let token=cloudGetToken();
+    if(!token){
       const res=await fetch(base+'/api/session');
-      if(res.ok){ const j=await res.json(); cloudSetToken(j.accessToken); await cloudPull(); cloudState.connected=true; setCloudStatus('conectado','var(--green)'); return; }
-    }catch(e){}
-  }
-  setCloudStatus('offline');
+      if(!res.ok){ let m=''; try{ m=(await res.json()).message||''; }catch(e){} console.warn('sessão automática falhou',res.status,m); setCloudStatus('offline','var(--red)'); return; }
+      const j=await res.json(); token=j.accessToken; cloudSetToken(token);
+    }
+    await cloudPull();
+    cloudState.connected=true; setCloudStatus('conectado','var(--green)');
+  }catch(e){ cloudState.connected=false; console.warn('conexão automática:', e && e.message); setCloudStatus('offline','var(--red)'); }
 }
 function cloudDisconnect(){ cloudSetToken(''); cloudState.connected=false; setCloudStatus('offline'); render(); }
 

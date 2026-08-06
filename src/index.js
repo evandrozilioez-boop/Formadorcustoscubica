@@ -62,11 +62,12 @@ export default {
         return json({ accessToken: await signToken({ sub: email, email, role: 'admin' }, env), usuario: { email } });
       }
 
-      // GET /api/session (conexão automática)
+      // GET /api/session (conexão automática — liberada por padrão)
       if (path === '/api/session') {
+        // Para blindar: defina REQUIRE_ACCESS=1 e proteja o site com Cloudflare Access.
+        const requireAccess = env.REQUIRE_ACCESS === '1';
         const accessJwt = request.headers.get('Cf-Access-Jwt-Assertion');
-        const openMode = env.OPEN_SESSION === '1';
-        if (!accessJwt && !openMode) return json({ message: 'Sessão automática indisponível. Ative Cloudflare Access ou defina OPEN_SESSION=1.' }, 403);
+        if (requireAccess && !accessJwt) return json({ message: 'Acesso exigido (Cloudflare Access).' }, 403);
         const email = request.headers.get('Cf-Access-Authenticated-User-Email') || env.AUTH_EMAIL || 'auto@local';
         return json({ accessToken: await signToken({ sub: email, email, role: 'admin' }, env), usuario: { email } });
       }
