@@ -221,7 +221,7 @@ tbody tr:hover{background:var(--surface-2)}
       </div>
       <div class="top-actions">
         <span class="chip hide-mobile" id="empChip">🏢 Arte Cúbica Matriz</span>
-        <span class="chip hide-mobile" id="cloudChip" title="Sincronização com o servidor (PostgreSQL)">☁ offline</span>
+        <span class="chip hide-mobile" id="cloudChip" onclick="cloudIrConectar()" title="Clique para conectar ao banco (PostgreSQL)">☁ offline</span>
         <button class="btn sm" onclick="toggleTheme()" id="themeBtn">🌙 Escuro</button>
         <button class="btn sm" onclick="logout()">Sair</button>
       </div>
@@ -292,57 +292,30 @@ function resetDB(){ if(confirm('Limpar todos os dados? Isso apaga produtos e his
    O app continua funcionando offline (localStorage). Quando um servidor é
    configurado em Configurações, os dados são carregados e salvos no banco. */
 const CLOUD_KEY='precificador_cloud';
+const CLOUD_TOKEN_KEY='precificador_token';
 let cloudState={connected:false, timer:null};
 function cloudCfg(){ try{ return JSON.parse(localStorage.getItem(CLOUD_KEY))||{}; }catch(e){ return {}; } }
-function cloudSetCfg(c){ localStorage.setItem(CLOUD_KEY, JSON.stringify(c)); }
-function cloudUrl(){ return (cloudCfg().url||'').trim().replace(/\/+$/,''); }
-function setCloudStatus(txt,color){ const c=el('cloudChip'); if(c){ c.textContent='☁ '+txt; c.style.color=color||'var(--muted)'; } }
-async function cloudLogin(){
-  const cfg=cloudCfg(); const base=cloudUrl(); if(!base) throw new Error('URL não configurada');
-  let res, j;
-  if(cfg.senha){ // login por credencial (URL/e-mail/senha informados)
-    res=await fetch(base+'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:cfg.email,senha:cfg.senha})});
-    if(!res.ok) throw new Error('login no servidor falhou');
-    j=await res.json();
-  } else { // sessão automática (mesmo domínio / Cloudflare Access)
-    res=await fetch(base+'/api/session');
-    if(!res.ok) throw new Error('sessão automática indisponível');
-    j=await res.json();
-  }
-  cfg.token=j.accessToken; cloudSetCfg(cfg); return j;
-}
-// Tenta conectar automaticamente ao mesmo domínio (Pages Functions), sem configurar nada
-async function cloudAutoStart(){
-  const cfg=cloudCfg();
-  if(cloudUrl() && (cfg.email||cfg.token)){ return cloudConnect(true); } // já configurado antes
-  if(location.protocol!=='http:' && location.protocol!=='https:'){ setCloudStatus('offline'); return; } // aberto como arquivo local
-  try{
-    const base=location.origin.replace(/\/+$/,'');
-    const res=await fetch(base+'/api/session');
-    if(!res.ok) throw new Error();
-    const j=await res.json();
-    cloudSetCfg({url:base, email:(j.usuario&&j.usuario.email)||'auto', senha:'', token:j.accessToken});
-    cloudState.connected=true; setCloudStatus('conectado','var(--green)');
-    await cloudPull();
-  }catch(e){ setCloudStatus('offline'); }
+// Persiste APENAS url e e-mail. A SENHA NUNCA é gravada no navegador.
+function cloudSetCfg(c){ localStorage.setItem(CLOUD_KEY, JSON.stringify({ url:(c.url||'').trim(), email:(c.email||'').trim() })); }
+function cloudUrl(){ const u=(cloudCfg().url||'').trim().replace(/\/+$/,''); if(u) return u; return (location.protocol==='http:'||location.protocol==='https:')?location.origin:''; }
+// Token de sessão: fica só na sessão do navegador (some ao fechar). Nunca a senha.
+function cloudGetToken(){ try{ return sessionStorage.getItem(CLOUD_TOKEN_KEY)||''; }catch(e){ return ''; } }
+function cloudSetToken(t){ try{ if(t) sessionStorage.setItem(CLOUD_TOKEN_KEY,t); else sessionStorage.removeItem(CLOUD_TOKEN_KEY); }catch(e){} }
+function setCloudStatus(txt,color){ const c=el('cloudChip'); if(c){ c.textContent='☁ '+txt; c.style.color=color||'var(--muted)'; c.style.cursor='pointer'; } }
+function cloudIrConectar(){ if(SESSION) nav('config'); }
+
+async function cloudLoginSenha(email, senha){
+  const base=cloudUrl(); if(!base) throw new Error('URL não configurada');
+  const res=await fetch(base+'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,senha})});
+  if(!res.ok) throw new Error('e-mail ou senha inválidos');
+  const j=await res.json(); cloudSetToken(j.accessToken); return j;
 }
 async function cloudApi(path, opts={}){
   const base=cloudUrl(); const headers=Object.assign({'Content-Type':'application/json'}, opts.headers||{});
-  let cfg=cloudCfg(); if(cfg.token) headers['Authorization']='Bearer '+cfg.token;
-  let res=await fetch(base+path, {...opts, headers});
-  if(res.status===401){ await cloudLogin(); cfg=cloudCfg(); headers['Authorization']='Bearer '+cfg.token; res=await fetch(base+path, {...opts, headers}); }
+  const t=cloudGetToken(); if(t) headers['Authorization']='Bearer '+t;
+  const res=await fetch(base+path, {...opts, headers});
+  if(res.status===401){ cloudState.connected=false; cloudSetToken(''); setCloudStatus('sessão expirada — reconecte','var(--red)'); throw new Error('não autorizado'); }
   return res;
-}
-async function cloudConnect(silent){
-  if(!cloudUrl()||!cloudCfg().email){ if(!silent) alert('Configure a URL e as credenciais do servidor.'); return false; }
-  try{
-    setCloudStatus('conectando…','var(--amber)');
-    await cloudLogin();
-    await cloudPull();
-    cloudState.connected=true; setCloudStatus('conectado','var(--green)');
-    if(!silent) alert('Conectado ao servidor. Dados sincronizados com o PostgreSQL.');
-    return true;
-  }catch(e){ cloudState.connected=false; setCloudStatus('offline','var(--red)'); if(!silent) alert('Falha ao conectar: '+e.message); return false; }
 }
 async function cloudPull(){
   const res=await cloudApi('/api/state?chave=default');
@@ -354,7 +327,7 @@ async function cloudPull(){
 function cloudMarkDirty(){ if(!cloudState.connected) return; clearTimeout(cloudState.timer); cloudState.timer=setTimeout(()=>cloudPush(false), 1500); }
 async function cloudPush(immediate){
   if(!cloudState.connected && !immediate) return;
-  if(!cloudUrl()) return;
+  if(!cloudGetToken()) return;
   try{
     setCloudStatus('salvando…','var(--amber)');
     const res=await cloudApi('/api/state',{method:'PUT',body:JSON.stringify({chave:'default',data:DB})});
@@ -362,11 +335,32 @@ async function cloudPush(immediate){
     setCloudStatus('salvo','var(--green)');
   }catch(e){ setCloudStatus('erro ao salvar','var(--red)'); }
 }
-function cloudDisconnect(){ const cfg=cloudCfg(); cfg.token=''; cloudSetCfg(cfg); cloudState.connected=false; setCloudStatus('offline'); render(); }
-function salvarCloud(){
-  cloudSetCfg({ url:el('clUrl').value.trim(), email:el('clEmail').value.trim(), senha:el('clSenha').value, token:'' });
-  cloudConnect(false);
+// Conectar informando a senha (a senha é usada só agora e não é salva)
+async function cloudConectar(){
+  const url=el('clUrl').value.trim(); const email=el('clEmail').value.trim(); const senha=el('clSenha').value;
+  cloudSetCfg({ url, email }); // guarda só url + e-mail
+  if(!email){ alert('Informe o e-mail.'); return; }
+  if(!senha){ alert('Digite a senha para conectar (ela não fica salva).'); return; }
+  try{
+    setCloudStatus('conectando…','var(--amber)');
+    await cloudLoginSenha(email, senha);
+    await cloudPull();
+    cloudState.connected=true; setCloudStatus('conectado','var(--green)');
+    if(el('clSenha')) el('clSenha').value=''; // limpa a senha da tela
+    alert('Conectado. A senha não é armazenada — será pedida de novo na próxima sessão.');
+    render();
+  }catch(e){ cloudState.connected=false; setCloudStatus('offline','var(--red)'); alert('Falha ao conectar: '+e.message); }
 }
+// No início: reaproveita o token da sessão atual, se existir; senão fica offline até digitar a senha
+async function cloudAutoStart(){
+  cloudSetCfg(cloudCfg()); // migração: remove senha/token que possam ter sido salvos em versões anteriores
+  if(cloudGetToken()){
+    try{ await cloudPull(); cloudState.connected=true; setCloudStatus('conectado','var(--green)'); return; }
+    catch(e){ cloudSetToken(''); }
+  }
+  setCloudStatus('offline');
+}
+function cloudDisconnect(){ cloudSetToken(''); cloudState.connected=false; setCloudStatus('offline'); render(); }
 
 /* ---------- Inicialização (sem produtos pré-cadastrados) ---------- */
 function seedData(db){
@@ -1636,14 +1630,14 @@ function viewConfig(){
     <div class="desc">Conecte ao servidor para persistir os dados no banco e sincronizar entre dispositivos</div></div>
     <span class="chip" id="cloudChip2" style="color:${cloudState.connected?'var(--green)':'var(--muted)'}">☁ ${cloudState.connected?'conectado':'offline'}</span></div>
     <div class="bd"><div class="grid g-3">
-      <div class="field" style="grid-column:span 3"><label>URL da API (backend)</label><input class="inp" id="clUrl" value="${(cloudCfg().url||'').replace(/"/g,'&quot;')}" placeholder="ex.: https://precificador-api.seudominio.com"></div>
-      <div class="field"><label>E-mail (usuário do backend)</label><input class="inp" id="clEmail" value="${(cloudCfg().email||'').replace(/"/g,'&quot;')}" placeholder="admin@artecubica.com.br"></div>
-      <div class="field"><label>Senha (backend)</label><input class="inp" type="password" id="clSenha" value="${(cloudCfg().senha||'').replace(/"/g,'&quot;')}" placeholder="senha do backend"></div>
-      <div class="field"><label>&nbsp;</label><div class="row"><button class="btn primary sm" onclick="salvarCloud()">🔌 Salvar & Conectar</button>
+      <div class="field" style="grid-column:span 3"><label>URL da API (deixe a do próprio site)</label><input class="inp" id="clUrl" value="${(cloudCfg().url||((location.protocol==='http:'||location.protocol==='https:')?location.origin:'')).replace(/"/g,'&quot;')}" placeholder="https://seu-projeto.pages.dev"></div>
+      <div class="field"><label>E-mail</label><input class="inp" id="clEmail" value="${(cloudCfg().email||'').replace(/"/g,'&quot;')}" placeholder="admin@artecubica.com.br"></div>
+      <div class="field"><label>Senha <span class="muted">(não é salva)</span></label><input class="inp" type="password" id="clSenha" value="" autocomplete="off" placeholder="digite para conectar"></div>
+      <div class="field"><label>&nbsp;</label><div class="row"><button class="btn primary sm" onclick="cloudConectar()">🔌 Conectar</button>
         <button class="btn sm" onclick="cloudPush(true)">⬆ Enviar agora</button>
         <button class="btn sm danger" onclick="cloudDisconnect()">Desconectar</button></div></div>
     </div>
-    <div class="hint">Enquanto não conectado, o app funciona offline (localStorage). Ao conectar, ele carrega os dados do servidor e passa a salvar automaticamente no PostgreSQL. As credenciais do backend são gerenciadas na API (usuário admin do seed).</div>
+    <div class="hint">🔒 A <b>senha não fica salva</b> no navegador — cada usuário digita ao conectar, e a sessão expira ao fechar o navegador. Só a URL e o e-mail são lembrados. Enquanto não conectado, o app funciona offline (localStorage).</div>
     </div></div>`:''}
 
   <div class="card" style="margin-top:18px"><div class="hd"><div><h3>Usuários</h3>
