@@ -501,6 +501,7 @@ function toggleMenu(){ const s=document.querySelector('.sidebar'), o=el('menuOve
 function closeMenu(){ document.querySelector('.sidebar').classList.remove('open'); el('menuOverlay').classList.remove('show'); }
 function nav(v){
   if(SESSION && !menuAllowed(v)){ v=firstAllowedView(); if(!v) return; }
+  if(v==='config') srvUsuarios=null; // recarrega usuários do servidor ao abrir Configurações
   currentView=v;
   closeMenu();
   document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active', b.dataset.view===v));
@@ -1796,8 +1797,12 @@ function downloadFile(name,content,type){
    CONFIGURAÇÕES
    ============================================================ */
 function perfilNome(key){ const pf=DB.perfis.find(p=>p.key===key); return pf?pf.nome:key; }
+let srvUsuarios=null;
+function usuariosLista(){ return (cloudUrl() && Array.isArray(srvUsuarios)) ? srvUsuarios : DB.usuarios; }
+async function carregarUsuarios(){ if(!cloudUrl()) return; try{ const res=await cloudApi('/api/users'); if(res.ok){ const j=await res.json(); srvUsuarios=j.usuarios||[]; render(); } }catch(e){} }
 function viewConfig(){
-  const isAdmin = SESSION.role==='admin' || (currentPerfil()||{}).admin;
+  const isAdmin = SESSION.admin || SESSION.role==='admin' || (currentPerfil()||{}).admin;
+  if(isAdmin && cloudUrl() && srvUsuarios===null){ srvUsuarios=[]; carregarUsuarios(); }
   return `<div class="row" style="justify-content:space-between;align-items:center;margin-bottom:16px">
     <div class="muted" style="font-size:13px">Metas de margem e dados da empresa</div>
     <button class="btn primary" onclick="salvarConfig()">💾 Salvar configurações</button>
@@ -1828,10 +1833,10 @@ function viewConfig(){
     </div></div>`:''}
 
   <div class="card" style="margin-top:18px"><div class="hd"><div><h3>Usuários</h3>
-    <div class="desc">${DB.usuarios.length} usuário(s)</div></div>
+    <div class="desc">${usuariosLista().length} usuário(s)${cloudUrl()?' · no servidor (senha com hash)':' · local (offline)'}</div></div>
     ${isAdmin?'<button class="btn primary sm" onclick="openUsuario()">＋ Novo usuário</button>':''}</div>
     <div class="bd" style="padding:0"><table><thead><tr><th>Nome</th><th>E-mail</th><th>Cargo</th><th>Departamento</th><th>Perfil</th><th>Status</th>${isAdmin?'<th></th>':''}</tr></thead>
-    <tbody>${DB.usuarios.map(u=>`<tr><td><b>${u.nome}</b></td><td class="muted">${u.email}</td><td>${u.cargo||'—'}</td><td>${u.departamento||'—'}</td>
+    <tbody>${usuariosLista().map(u=>`<tr><td><b>${u.nome}</b></td><td class="muted">${u.email}</td><td>${u.cargo||'—'}</td><td>${u.departamento||'—'}</td>
       <td><span class="badge-lvl">${perfilNome(u.perfil)}</span></td><td><span class="tag ${u.status==='Ativo'?'green':'red'}">${u.status}</span></td>
       ${isAdmin?`<td style="white-space:nowrap"><button class="btn sm" onclick="openUsuario('${u.id}')">✎</button> <button class="btn sm danger" onclick="excluirUsuario('${u.id}')">🗑</button></td>`:''}</tr>`).join('')}</tbody></table></div></div>
 
@@ -1871,7 +1876,7 @@ function salvarMenuPerms(){
 }
 /* ---------- Cadastro de usuários ---------- */
 function openUsuario(id){
-  const u = id ? DB.usuarios.find(x=>x.id===id) : {nome:'',email:'',senha:'',cargo:'',departamento:'',perfil:(DB.perfis[0]&&DB.perfis[0].key)||'vendedor',status:'Ativo'};
+  const u = id ? usuariosLista().find(x=>x.id===id) : {nome:'',email:'',senha:'',cargo:'',departamento:'',perfil:(DB.perfis[0]&&DB.perfis[0].key)||'vendedor',status:'Ativo'};
   const editando=!!id;
   el('modalRoot').innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
     <div class="modal-hd"><h3>${editando?'Editar usuário':'Novo usuário'}</h3><button class="btn sm" onclick="closeModal()">✕</button></div>
@@ -1894,21 +1899,38 @@ function openUsuario(id){
       <button class="btn primary" onclick="salvarUsuario(${id?`'${id}'`:'null'})">Salvar usuário</button></div>
   </div></div>`;
 }
-function salvarUsuario(id){
+async function salvarUsuario(id){
   const nome=el('usNome').value.trim(), email=el('usEmail').value.trim(), senha=el('usSenha').value;
   if(!nome||!email){ alert('Informe nome e e-mail.'); return; }
+  const perfil=el('usPerfil').value, status=el('usStatus').value, cargo=el('usCargo').value.trim(), departamento=el('usDep').value.trim();
+  const admin=!!(DB.perfis.find(pf=>pf.key===perfil)||{}).admin;
+  if(cloudUrl()){ // servidor (senha com hash no PostgreSQL)
+    try{
+      let res;
+      if(id){ res=await cloudApi('/api/users/'+id,{method:'PUT',body:JSON.stringify({nome,email,cargo,departamento,perfil,admin,status,senha:senha||undefined})}); }
+      else { if(!senha){ alert('Defina uma senha.'); return; } res=await cloudApi('/api/users',{method:'POST',body:JSON.stringify({nome,email,cargo,departamento,perfil,admin,status,senha})}); }
+      const j=await res.json().catch(()=>({}));
+      if(!res.ok){ alert(j.message||'Erro ao salvar usuário.'); return; }
+      closeModal(); await carregarUsuarios();
+    }catch(e){ alert('Falha ao salvar no servidor: '+e.message); }
+    return;
+  }
+  // offline (local)
   if(DB.usuarios.some(x=>x.email.toLowerCase()===email.toLowerCase() && x.id!==id)){ alert('Já existe um usuário com esse e-mail.'); return; }
-  const dados={nome,email,cargo:el('usCargo').value.trim(),departamento:el('usDep').value.trim(),perfil:el('usPerfil').value,status:el('usStatus').value};
+  const dados={nome,email,cargo,departamento,perfil,status};
   if(id){ const u=DB.usuarios.find(x=>x.id===id); Object.assign(u,dados); if(senha) u.senha=senha; }
   else { if(!senha){ alert('Defina uma senha.'); return; } DB.usuarios.push({id:uid(),senha,...dados}); }
-  DB.historico.push({id:uid(),user:SESSION.nome,acao:id?'Edição de usuário':'Cadastro de usuário',campo:email,ant:'—',novo:nome,data:new Date().toISOString()});
   save(); closeModal(); render();
 }
-function excluirUsuario(id){
-  const u=DB.usuarios.find(x=>x.id===id); if(!u) return;
+async function excluirUsuario(id){
+  const u=usuariosLista().find(x=>x.id===id); if(!u) return;
   if(u.id===SESSION.userId){ alert('Você não pode excluir o próprio usuário logado.'); return; }
-  if(DB.usuarios.filter(x=>x.perfil==='admin' && x.status==='Ativo').length<=1 && u.perfil==='admin'){ alert('Deve existir ao menos um administrador ativo.'); return; }
   if(!confirm(`Excluir o usuário "${u.nome}"?`)) return;
+  if(cloudUrl()){
+    try{ const res=await cloudApi('/api/users/'+id,{method:'DELETE'}); const j=await res.json().catch(()=>({})); if(!res.ok){ alert(j.message||'Erro ao excluir.'); return; } await carregarUsuarios(); }catch(e){ alert('Falha: '+e.message); }
+    return;
+  }
+  if(DB.usuarios.filter(x=>x.perfil==='admin' && x.status==='Ativo').length<=1 && u.perfil==='admin'){ alert('Deve existir ao menos um administrador ativo.'); return; }
   DB.usuarios=DB.usuarios.filter(x=>x.id!==id); save(); render();
 }
 /* ---------- Cadastro de perfis ---------- */
@@ -1950,7 +1972,7 @@ function excluirPerfil(key){
 
 /* ---------- permissões ---------- */
 function currentPerfil(){ return DB.perfis.find(pf=>pf.key===SESSION.role); }
-function can(p){ const pf=currentPerfil(); if(!pf) return false; if(pf.admin) return true; if(p==='impostos') return false; if(p==='relatorios') return true; return !!pf.editar; }
+function can(p){ if(SESSION&&SESSION.admin) return true; const pf=currentPerfil(); if(!pf) return false; if(pf.admin) return true; if(p==='impostos') return false; if(p==='relatorios') return true; return !!pf.editar; }
 
 /* ---------- Controle de menus por perfil ---------- */
 const MENU_LIST=[['dashboard','Dashboard'],['calc','Precificação'],['simulador','Simulador'],['produtos','Produtos'],['materiaprima','Matéria-Prima'],['engenharia','Engenharia'],['impostos','Markup'],['frete','Frete'],['tabelapreco','Tabela de Preço'],['relatorios','Relatórios'],['config','Configurações']];
@@ -1958,7 +1980,7 @@ function defaultMenuPerms(){return {
   gestor:{dashboard:true,calc:true,simulador:true,produtos:true,materiaprima:true,engenharia:true,impostos:false,frete:true,tabelapreco:true,relatorios:true,config:false},
   vendedor:{dashboard:true,calc:true,simulador:true,produtos:true,materiaprima:false,engenharia:false,impostos:false,frete:false,tabelapreco:true,relatorios:true,config:false}
 };}
-function menuAllowed(view){ if(!SESSION) return false; const pf=currentPerfil(); if(pf&&pf.admin) return true; return !!(DB.menuPerms && DB.menuPerms[SESSION.role] && DB.menuPerms[SESSION.role][view]); }
+function menuAllowed(view){ if(!SESSION) return false; if(SESSION.admin) return true; const pf=currentPerfil(); if(pf&&pf.admin) return true; return !!(DB.menuPerms && DB.menuPerms[SESSION.role] && DB.menuPerms[SESSION.role][view]); }
 function firstAllowedView(){ const m=MENU_LIST.find(([k])=>menuAllowed(k)); return m?m[0]:null; }
 function applyMenuPerms(){ if(!SESSION) return; document.querySelectorAll('#nav button[data-view]').forEach(b=>{ b.style.display=menuAllowed(b.dataset.view)?'':'none'; }); }
 function lockView(msg){return `<div class="card"><div class="bd" style="text-align:center;padding:50px">
@@ -1967,23 +1989,41 @@ function lockView(msg){return `<div class="card"><div class="bd" style="text-ali
 /* ============================================================
    LOGIN / SESSÃO / TEMA
    ============================================================ */
-function doLogin(){
-  const email=el('lgEmail').value.trim().toLowerCase();
+async function doLogin(){
+  const email=el('lgEmail').value.trim();
   const senha=el('lgPass').value;
-  const u=DB.usuarios.find(x=>x.email.toLowerCase()===email);
+  const base=cloudUrl();
+  // 1) Autenticação no SERVIDOR (senha com hash no PostgreSQL)
+  if(base){
+    el('lgMsg').textContent='Entrando…'; el('lgMsg').style.color='var(--muted)';
+    try{
+      const res=await fetch(base+'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,senha})});
+      const j=await res.json().catch(()=>({}));
+      if(!res.ok){ el('lgMsg').textContent=j.message||'E-mail ou senha inválidos.'; el('lgMsg').style.color='var(--red)'; return; }
+      cloudSetToken(j.accessToken);
+      SESSION={role:(j.usuario.perfil||'vendedor'), nome:j.usuario.nome, userId:j.usuario.id, email:j.usuario.email, admin:!!j.usuario.admin};
+      cloudState.connected=true; setCloudStatus('conectado','var(--green)');
+      try{ await cloudPull(); }catch(e){}
+      entrarApp(); return;
+    }catch(e){ /* servidor indisponível → tenta modo offline abaixo */ }
+  }
+  // 2) Fallback OFFLINE (sem servidor): valida no cadastro local
+  const u=DB.usuarios.find(x=>x.email.toLowerCase()===email.toLowerCase());
   if(!u || u.senha!==senha){ el('lgMsg').textContent='E-mail ou senha inválidos.'; el('lgMsg').style.color='var(--red)'; return; }
   if(u.status!=='Ativo'){ el('lgMsg').textContent='Usuário inativo.'; el('lgMsg').style.color='var(--red)'; return; }
   const role = DB.perfis.some(pf=>pf.key===u.perfil) ? u.perfil : 'vendedor';
-  SESSION={role, nome:u.nome, userId:u.id};
+  SESSION={role, nome:u.nome, userId:u.id, admin:!!(DB.perfis.find(pf=>pf.key===role)||{}).admin};
+  entrarApp();
+}
+function entrarApp(){
   el('loginScreen').classList.add('hidden');
   el('appRoot').classList.remove('hidden');
-  const pfNome=(currentPerfil()||{}).nome||role;
+  const pfNome=(currentPerfil()||{}).nome||SESSION.role;
   el('userBox').innerHTML=`<div class="row" style="gap:9px"><div style="width:32px;height:32px;border-radius:50%;background:var(--primary);color:#fff;display:grid;place-items:center;font-weight:700">${SESSION.nome[0]}</div>
     <div><b style="font-size:12.5px">${SESSION.nome}</b><br><span class="badge-lvl">${pfNome}</span></div></div>`;
   el('empChip').textContent='🏢 '+DB.empresa;
   applyMenuPerms();
   nav(firstAllowedView()||'dashboard');
-  if(!cloudState.connected) cloudAutoStart();
 }
 function logout(){SESSION=null;el('appRoot').classList.add('hidden');el('loginScreen').classList.remove('hidden');}
 function toggleTheme(){

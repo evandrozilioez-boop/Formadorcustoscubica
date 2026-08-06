@@ -1,27 +1,22 @@
 // Worker único: API (/api/*) + arquivos estáticos (binding ASSETS -> pasta public).
+// SEGURANÇA: em produção, a API só responde a quem passou pelo Cloudflare Access
+// (identidade verificada). Sem Access configurado, a API é negada (403), exceto
+// se OPEN_SESSION=1 for definido explicitamente (apenas para testes).
 import postgres from 'postgres';
 
-/* ---------- Auth: JWT HS256 via Web Crypto ---------- */
+/* ---------- Token da aplicação (JWT HS256 via Web Crypto) ---------- */
 const enc = new TextEncoder();
-function b64urlStr(str) {
-  return btoa(unescape(encodeURIComponent(str))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-function b64urlBuf(buf) {
-  let s = ''; const b = new Uint8Array(buf);
-  for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
-  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
+function b64urlStr(str) { return btoa(unescape(encodeURIComponent(str))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
+function b64urlBuf(buf) { let s = ''; const b = new Uint8Array(buf); for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
+function b64urlToJson(s) { return JSON.parse(decodeURIComponent(escape(atob(s.replace(/-/g, '+').replace(/_/g, '/'))))); }
 async function hmac(data, secret) {
   const key = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(data));
-  return b64urlBuf(sig);
+  return b64urlBuf(await crypto.subtle.sign('HMAC', key, enc.encode(data)));
 }
 async function signToken(payload, env) {
   const secret = env.JWT_SECRET || 'dev-secret';
   const body = { ...payload, exp: Math.floor(Date.now() / 1000) + 60 * 60 * 8 };
-  const h = b64urlStr(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
-  const p = b64urlStr(JSON.stringify(body));
-  const data = h + '.' + p;
+  const data = b64urlStr(JSON.stringify({ alg: 'HS256', typ: 'JWT' })) + '.' + b64urlStr(JSON.stringify(body));
   return data + '.' + (await hmac(data, secret));
 }
 async function verifyToken(token, env) {
@@ -29,16 +24,86 @@ async function verifyToken(token, env) {
     if (!token) return false;
     const secret = env.JWT_SECRET || 'dev-secret';
     const parts = token.split('.'); if (parts.length !== 3) return false;
-    const [h, p, s] = parts;
-    if ((await hmac(h + '.' + p, secret)) !== s) return false;
-    const payload = JSON.parse(decodeURIComponent(escape(atob(p.replace(/-/g, '+').replace(/_/g, '/')))));
-    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return false;
+    if ((await hmac(parts[0] + '.' + parts[1], secret)) !== parts[2]) return false;
+    const p = b64urlToJson(parts[1]);
+    if (p.exp && p.exp < Math.floor(Date.now() / 1000)) return false;
     return true;
   } catch (e) { return false; }
 }
+
+/* ---------- Verificação do Cloudflare Access (RS256 via JWKS) ---------- */
+let _jwks = null, _jwksAt = 0;
+async function getJwks(team) {
+  const now = Date.now();
+  if (_jwks && (now - _jwksAt) < 3600000) return _jwks;
+  const res = await fetch(`https://${team}.cloudflareaccess.com/cdn-cgi/access/certs`);
+  _jwks = await res.json(); _jwksAt = now; return _jwks;
+}
+// Retorna o e-mail autenticado se o token de Access for válido; senão null.
+async function verifyAccess(token, env) {
+  try {
+    if (!token) return null;
+    const team = env.ACCESS_TEAM, aud = env.ACCESS_AUD;
+    if (!team || !aud) return null; // Access não configurado
+    const parts = token.split('.'); if (parts.length !== 3) return null;
+    const header = b64urlToJson(parts[0]);
+    const jwks = await getJwks(team);
+    const jwk = (jwks.keys || []).find(k => k.kid === header.kid);
+    if (!jwk) return null;
+    const key = await crypto.subtle.importKey('jwk', jwk, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
+    const sig = Uint8Array.from(atob(parts[2].replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+    const ok = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, sig, enc.encode(parts[0] + '.' + parts[1]));
+    if (!ok) return null;
+    const p = b64urlToJson(parts[1]);
+    if (p.exp && p.exp < Math.floor(Date.now() / 1000)) return null;
+    const auds = Array.isArray(p.aud) ? p.aud : [p.aud];
+    if (!auds.includes(aud)) return null;
+    return p.email || p.sub || 'access-user';
+  } catch (e) { return null; }
+}
+
+/* ---------- Senhas: PBKDF2-SHA256 (Web Crypto) ---------- */
+function bufB64(buf) { let s = ''; const b = new Uint8Array(buf); for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
+function b64Buf(s) { return Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0)); }
+async function hashPassword(senha) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const key = await crypto.subtle.importKey('raw', enc.encode(senha), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' }, key, 256);
+  return 'pbkdf2$100000$' + bufB64(salt) + '$' + bufB64(bits);
+}
+async function verifyPassword(senha, stored) {
+  try {
+    const [alg, iterS, saltS, hashS] = String(stored).split('$');
+    if (alg !== 'pbkdf2') return false;
+    const key = await crypto.subtle.importKey('raw', enc.encode(senha), 'PBKDF2', false, ['deriveBits']);
+    const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: b64Buf(saltS), iterations: parseInt(iterS, 10), hash: 'SHA-256' }, key, 256);
+    return bufB64(bits) === hashS;
+  } catch (e) { return false; }
+}
+/* ---------- Usuários (PostgreSQL) ---------- */
+function openSql(env) { return postgres(env.HYPERDRIVE.connectionString, { max: 3, fetch_types: false }); }
+async function ensureUsuarios(sql, env) {
+  await sql`CREATE TABLE IF NOT EXISTS usuarios (
+    id text PRIMARY KEY, nome text NOT NULL, email text UNIQUE NOT NULL, senha_hash text NOT NULL,
+    cargo text, departamento text, perfil text DEFAULT 'vendedor', admin boolean DEFAULT false,
+    status text DEFAULT 'Ativo', created_at timestamptz DEFAULT now())`;
+  const cnt = await sql`SELECT count(*)::int AS n FROM usuarios`;
+  if (cnt[0].n === 0) {
+    const email = env.ADMIN_EMAIL || 'admin@artecubica.com.br';
+    const senha = env.ADMIN_PASSWORD || 'admin';
+    await sql`INSERT INTO usuarios (id,nome,email,senha_hash,perfil,admin,status)
+      VALUES (${crypto.randomUUID()},'Administrador',${email},${await hashPassword(senha)},'admin',true,'Ativo')`;
+  }
+}
+async function appTokenPayload(request, env) {
+  const t = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+  if (!(await verifyToken(t, env))) return null;
+  try { return b64urlToJson(t.split('.')[1]); } catch (e) { return null; }
+}
+
 const CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET,PUT,POST,OPTIONS',
+  'Access-Control-Allow-Methods': 'GET,PUT,POST,DELETE,OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type,Authorization',
 };
 function json(obj, status = 200) {
@@ -53,26 +118,89 @@ export default {
     if (path.startsWith('/api/')) {
       if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
 
-      // POST /api/auth/login
+      // ===== BARREIRA DE SEGURANÇA =====
+      // Em produção toda a API exige Cloudflare Access (identidade verificada).
+      const openMode = env.OPEN_SESSION === '1'; // apenas para testes
+      let accessEmail = null;
+      if (!openMode) {
+        accessEmail = await verifyAccess(request.headers.get('Cf-Access-Jwt-Assertion'), env);
+        if (!accessEmail) {
+          return json({ message: 'Acesso negado. Proteja o site com Cloudflare Access e configure ACCESS_TEAM e ACCESS_AUD.' }, 403);
+        }
+      }
+
+      // GET /api/session → emite o token da aplicação (já autenticado pelo Access)
+      if (path === '/api/session') {
+        const email = accessEmail || request.headers.get('Cf-Access-Authenticated-User-Email') || env.AUTH_EMAIL || 'auto@local';
+        return json({ accessToken: await signToken({ sub: email, email, role: 'admin' }, env), usuario: { email } });
+      }
+
+      // POST /api/auth/login → autentica contra a tabela usuarios (senha com hash)
       if (path === '/api/auth/login') {
         if (request.method !== 'POST') return json({ message: 'Método não permitido' }, 405);
         let body; try { body = await request.json(); } catch (e) { return json({ message: 'JSON inválido' }, 400); }
         const { email, senha } = body || {};
-        if (!email || email !== env.AUTH_EMAIL || senha !== env.AUTH_PASSWORD) return json({ message: 'Credenciais inválidas' }, 401);
-        return json({ accessToken: await signToken({ sub: email, email, role: 'admin' }, env), usuario: { email } });
+        if (!env.HYPERDRIVE || !env.HYPERDRIVE.connectionString) return json({ message: 'Banco não configurado' }, 500);
+        const sql = openSql(env);
+        try {
+          await ensureUsuarios(sql, env);
+          const rows = await sql`SELECT * FROM usuarios WHERE lower(email)=lower(${email || ''})`;
+          const u = rows[0];
+          if (!u || u.status !== 'Ativo' || !(await verifyPassword(senha || '', u.senha_hash))) {
+            return json({ message: 'E-mail ou senha inválidos' }, 401);
+          }
+          const token = await signToken({ sub: u.id, email: u.email, nome: u.nome, role: u.perfil, admin: u.admin }, env);
+          return json({ accessToken: token, usuario: { id: u.id, nome: u.nome, email: u.email, perfil: u.perfil, admin: u.admin, role: u.perfil } });
+        } finally { ctx.waitUntil(sql.end()); }
       }
 
-      // GET /api/session (conexão automática — liberada por padrão)
-      if (path === '/api/session') {
-        // Para blindar: defina REQUIRE_ACCESS=1 e proteja o site com Cloudflare Access.
-        const requireAccess = env.REQUIRE_ACCESS === '1';
-        const accessJwt = request.headers.get('Cf-Access-Jwt-Assertion');
-        if (requireAccess && !accessJwt) return json({ message: 'Acesso exigido (Cloudflare Access).' }, 403);
-        const email = request.headers.get('Cf-Access-Authenticated-User-Email') || env.AUTH_EMAIL || 'auto@local';
-        return json({ accessToken: await signToken({ sub: email, email, role: 'admin' }, env), usuario: { email } });
+      // /api/users → gestão de usuários (apenas admin)
+      if (path === '/api/users' || path.startsWith('/api/users/')) {
+        const payload = await appTokenPayload(request, env);
+        if (!payload) return json({ message: 'Não autorizado' }, 401);
+        if (!payload.admin) return json({ message: 'Apenas administrador' }, 403);
+        if (!env.HYPERDRIVE || !env.HYPERDRIVE.connectionString) return json({ message: 'Banco não configurado' }, 500);
+        const sql = openSql(env);
+        try {
+          await ensureUsuarios(sql, env);
+          if (path === '/api/users' && request.method === 'GET') {
+            const rows = await sql`SELECT id,nome,email,cargo,departamento,perfil,admin,status FROM usuarios ORDER BY nome`;
+            return json({ usuarios: rows });
+          }
+          if (path === '/api/users' && request.method === 'POST') {
+            const b = await request.json();
+            if (!b.nome || !b.email || !b.senha) return json({ message: 'Nome, e-mail e senha são obrigatórios' }, 400);
+            const dup = await sql`SELECT 1 FROM usuarios WHERE lower(email)=lower(${b.email})`;
+            if (dup.length) return json({ message: 'E-mail já cadastrado' }, 409);
+            const id = crypto.randomUUID();
+            await sql`INSERT INTO usuarios (id,nome,email,senha_hash,cargo,departamento,perfil,admin,status)
+              VALUES (${id},${b.nome},${b.email},${await hashPassword(b.senha)},${b.cargo || ''},${b.departamento || ''},${b.perfil || 'vendedor'},${!!b.admin},${b.status || 'Ativo'})`;
+            return json({ id });
+          }
+          const mm = path.match(/^\/api\/users\/(.+)$/);
+          if (mm) {
+            const id = mm[1];
+            if (request.method === 'PUT') {
+              const b = await request.json();
+              await sql`UPDATE usuarios SET nome=${b.nome},email=${b.email},cargo=${b.cargo || ''},departamento=${b.departamento || ''},perfil=${b.perfil || 'vendedor'},admin=${!!b.admin},status=${b.status || 'Ativo'} WHERE id=${id}`;
+              if (b.senha) await sql`UPDATE usuarios SET senha_hash=${await hashPassword(b.senha)} WHERE id=${id}`;
+              return json({ ok: true });
+            }
+            if (request.method === 'DELETE') {
+              const alvo = await sql`SELECT admin FROM usuarios WHERE id=${id}`;
+              if (alvo[0] && alvo[0].admin) {
+                const n = await sql`SELECT count(*)::int AS n FROM usuarios WHERE admin=true AND status='Ativo'`;
+                if (n[0].n <= 1) return json({ message: 'Deve existir ao menos um administrador ativo' }, 400);
+              }
+              await sql`DELETE FROM usuarios WHERE id=${id}`;
+              return json({ ok: true });
+            }
+          }
+          return json({ message: 'Rota não encontrada' }, 404);
+        } finally { ctx.waitUntil(sql.end()); }
       }
 
-      // GET/PUT /api/state (PostgreSQL via Hyperdrive)
+      // GET/PUT /api/state → dados no PostgreSQL (exige o token da aplicação)
       if (path === '/api/state') {
         const token = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
         if (!(await verifyToken(token, env))) return json({ message: 'Não autorizado' }, 401);
@@ -106,7 +234,7 @@ export default {
       return json({ message: 'Rota não encontrada' }, 404);
     }
 
-    // Demais rotas → arquivos estáticos (public) via ASSETS
+    // Estáticos (public) via ASSETS
     return env.ASSETS.fetch(request);
   },
 };

@@ -7,6 +7,13 @@ main = "src/index.js"
 directory = "public"
 binding = "ASSETS"
 
+# Segurança (defina como variáveis/secrets no painel, NÃO aqui):
+#   JWT_SECRET   = segredo forte e aleatório (obrigatório)
+#   ACCESS_TEAM  = prefixo do time (de SEU-TIME.cloudflareaccess.com)
+#   ACCESS_AUD   = Application Audience (AUD) Tag do Cloudflare Access
+#   (NÃO defina OPEN_SESSION em produção — deixa a API aberta; só para teste)
+# Veja SEGURANCA.md.
+
 # PostgreSQL via Cloudflare Hyperdrive.
 [[hyperdrive]]
 binding = "HYPERDRIVE"
