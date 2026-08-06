@@ -294,13 +294,14 @@ function resetDB(){ if(confirm('Limpar todos os dados? Isso apaga produtos e his
 const CLOUD_KEY='precificador_cloud';
 const CLOUD_TOKEN_KEY='precificador_token';
 let cloudState={connected:false, timer:null};
+let cloudMemToken=''; // fallback em memória (caso o navegador bloqueie o armazenamento)
 function cloudCfg(){ try{ return JSON.parse(localStorage.getItem(CLOUD_KEY))||{}; }catch(e){ return {}; } }
 // Persiste APENAS url e e-mail. A SENHA NUNCA é gravada no navegador.
-function cloudSetCfg(c){ localStorage.setItem(CLOUD_KEY, JSON.stringify({ url:(c.url||'').trim(), email:(c.email||'').trim() })); }
+function cloudSetCfg(c){ try{ localStorage.setItem(CLOUD_KEY, JSON.stringify({ url:(c.url||'').trim(), email:(c.email||'').trim() })); }catch(e){} }
 function cloudUrl(){ const u=(cloudCfg().url||'').trim().replace(/\/+$/,''); if(u) return u; return (location.protocol==='http:'||location.protocol==='https:')?location.origin:''; }
-// Token de sessão: fica só na sessão do navegador (some ao fechar). Nunca a senha.
-function cloudGetToken(){ try{ return sessionStorage.getItem(CLOUD_TOKEN_KEY)||''; }catch(e){ return ''; } }
-function cloudSetToken(t){ try{ if(t) sessionStorage.setItem(CLOUD_TOKEN_KEY,t); else sessionStorage.removeItem(CLOUD_TOKEN_KEY); }catch(e){} }
+// Token de sessão: sessionStorage quando permitido, senão memória. Nunca a senha.
+function cloudGetToken(){ try{ const t=sessionStorage.getItem(CLOUD_TOKEN_KEY); if(t) return t; }catch(e){} return cloudMemToken; }
+function cloudSetToken(t){ cloudMemToken=t||''; try{ if(t) sessionStorage.setItem(CLOUD_TOKEN_KEY,t); else sessionStorage.removeItem(CLOUD_TOKEN_KEY); }catch(e){} }
 function setCloudStatus(txt,color){ const c=el('cloudChip'); if(c){ c.textContent='☁ '+txt; c.style.color=color||'var(--muted)'; c.style.cursor='pointer'; } }
 function cloudIrConectar(){ if(SESSION) nav('config'); }
 
@@ -355,12 +356,21 @@ async function cloudConectar(){
     render();
   }catch(e){ cloudState.connected=false; setCloudStatus('offline','var(--red)'); alert('Falha ao conectar: '+e.message); }
 }
-// No início: reaproveita o token da sessão atual, se existir; senão fica offline até digitar a senha
+// No início: conecta sozinho (sem precisar clicar). Requer OPEN_SESSION=1 (ou Cloudflare Access) no servidor.
 async function cloudAutoStart(){
-  cloudSetCfg(cloudCfg()); // migração: remove senha/token que possam ter sido salvos em versões anteriores
+  cloudSetCfg(cloudCfg()); // limpa qualquer senha salva por versões antigas
+  // 1) já existe token nesta sessão do navegador?
   if(cloudGetToken()){
     try{ await cloudPull(); cloudState.connected=true; setCloudStatus('conectado','var(--green)'); return; }
     catch(e){ cloudSetToken(''); }
+  }
+  // 2) conexão automática no mesmo domínio
+  const base=cloudUrl();
+  if(base && (location.protocol==='http:'||location.protocol==='https:')){
+    try{
+      const res=await fetch(base+'/api/session');
+      if(res.ok){ const j=await res.json(); cloudSetToken(j.accessToken); await cloudPull(); cloudState.connected=true; setCloudStatus('conectado','var(--green)'); return; }
+    }catch(e){}
   }
   setCloudStatus('offline');
 }
@@ -1800,6 +1810,7 @@ function doLogin(){
   el('empChip').textContent='🏢 '+DB.empresa;
   applyMenuPerms();
   nav(firstAllowedView()||'dashboard');
+  if(!cloudState.connected) cloudAutoStart();
 }
 function logout(){SESSION=null;el('appRoot').classList.add('hidden');el('loginScreen').classList.remove('hidden');}
 function toggleTheme(){
