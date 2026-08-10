@@ -1211,6 +1211,7 @@ function engTecidoCard(eng,editavel){
   const body=tecs.map((t,i)=>`<tr>
     <td><b>${t.classe}</b></td>
     <td style="min-width:180px"><input class="inp" list="engMatList" placeholder="tecido (insumo)" value="${(t.materialCod||'').replace(/"/g,'&quot;')}" onchange="onEngTecMat(${i},this)" ${editavel?'':'disabled'}></td>
+    <td class="muted" id="engtecun_${i}" style="text-align:center;white-space:nowrap;font-weight:600">${(engMatUnid(t)||'—').toString().replace(/</g,'&lt;')}</td>
     <td style="width:120px"><input class="inp eng-tot" value="${t.consumo==null?'':t.consumo}" placeholder="consumo" oninput="onEngTecEdit(${i},this)" ${editavel?'':'disabled'}></td>
     ${editavel?`<td class="no-print"><button class="btn sm danger" onclick="engDelTec(${i})">✕</button></td>`:''}
   </tr>`).join('');
@@ -1226,8 +1227,8 @@ function engTecidoCard(eng,editavel){
       </div>
     </div>
     <div class="bd" style="padding:0;overflow:auto"><table><thead><tr>
-      <th>Classe</th><th>Matéria-prima (tecido)</th><th>Consumo</th>${editavel?'<th class="no-print"></th>':''}
-    </tr></thead><tbody>${body||`<tr><td colspan="${editavel?4:3}" class="muted" style="padding:16px">Sem variações. Cadastre tecidos no produto ou clique em “＋ Classe”.</td></tr>`}</tbody></table></div></div>`;
+      <th>Classe</th><th>Matéria-prima (tecido)</th><th title="Unidade de medida do insumo">Un.</th><th>Consumo</th>${editavel?'<th class="no-print"></th>':''}
+    </tr></thead><tbody>${body||`<tr><td colspan="${editavel?5:4}" class="muted" style="padding:16px">Sem variações. Cadastre tecidos no produto ou clique em “＋ Classe”.</td></tr>`}</tbody></table></div></div>`;
 }
 function engRollupHTML(eng){
   const base=custoBase(eng);
@@ -1384,6 +1385,7 @@ function onEngTecMat(i,inputEl){
   const val=inputEl.value.trim(); const cod=val.includes(' · ')?val.split(' · ')[0].trim():val;
   const mat=DB.materiais.find(m=>m.codigo.toLowerCase()===cod.toLowerCase());
   eng.tecidos[i].materialCod = mat?mat.codigo:val; eng.tecidos[i].materialId = mat?mat.id:null;
+  const uc=el('engtecun_'+i); if(uc) uc.textContent=engMatUnid(eng.tecidos[i])||'—';
   engTocarRevisao(eng); save(); render();
 }
 function engAddTec(){ const eng=engCurrent(); (eng.tecidos||(eng.tecidos=[])).push({classe:prompt('Classe do tecido (ex.: A):','')||'',materialCod:'',materialId:null,consumo:''}); engTocarRevisao(eng); save(); render(); }
