@@ -161,7 +161,7 @@ tbody tr:hover{background:var(--surface-2)}
 .print-only{display:none}
 @media print{
   body{background:#fff}
-  .sidebar,.topbar,.no-print,#modalRoot{display:none!important}
+  .sidebar,.topbar,.no-print,#modalRoot,.app-footer{display:none!important}
   .app{display:block}
   .content{padding:0;max-width:none}
   .print-only{display:block}
@@ -172,6 +172,8 @@ tbody tr:hover{background:var(--surface-2)}
   .eng-block .no-print{display:none!important}
   input,select{border:none!important;background:transparent!important;padding:0!important;-webkit-appearance:none;appearance:none}
 }
+.app-footer{margin-top:auto;padding:14px 26px;border-top:1px solid var(--border);color:var(--muted);font-size:11.5px;text-align:center;letter-spacing:.2px}
+@media(max-width:760px){.app-footer{padding:12px 14px;font-size:10.5px}}
 </style>
 </head>
 <body>
@@ -230,6 +232,7 @@ tbody tr:hover{background:var(--surface-2)}
       </div>
     </div>
     <div class="content" id="content"></div>
+    <footer class="app-footer">© Todos os direitos reservados — ARTE CÚBICA INDÚSTRIA DE MÓVEIS LTDA · BY AUTOMATIZA GESTÃO LTDA</footer>
   </div>
 </div>
 
@@ -1171,20 +1174,22 @@ function engCellFor(eng,blk,r,i,c,editavel){
 function engBlockCard(eng,blk,idx,editavel){
   const rows=engBlock(eng,blk.key);
   const matTh='<th>Matéria-prima</th>';
+  const unTh='<th title="Unidade de medida do insumo">Un.</th>';
   const colsTh=blk.cols.map(c=>`<th>${c[1]}</th>`).join('');
-  const th=(blk.matFirst?matTh+colsTh:colsTh+matTh)+'<th class="no-print" title="Marque para valer em todos os tamanhos">Padrão</th>';
+  const th=(blk.matFirst?matTh+unTh+colsTh:colsTh+matTh+unTh)+'<th class="no-print" title="Marque para valer em todos os tamanhos">Padrão</th>';
   // Zebra por densidade (espumas): cada densidade distinta alterna faixa — listrado na impressão P&B
   let zebra=null;
   if(blk.key==='espumas'){ zebra={}; [...new Set(rows.map(x=>(x.ref||'').trim()))].forEach((rf,idx)=>{ zebra[rf]=idx%2; }); }
   const body=rows.map((r,i)=>{
     const colsCells=blk.cols.map(c=>engCellFor(eng,blk,r,i,c,editavel)).join('');
     const mc=`<td style="min-width:160px"><input class="inp" list="engMatList" ${(blk.key==='madeira'||blk.key==='espumas')&&i>0&&rows[i-1].materialCod?`placeholder="sugestão: ${(rows[i-1].materialCod||'').replace(/"/g,'&quot;')}" onfocus="engSugereMat('${blk.key}',${i},this)"`:'placeholder="buscar insumo"'} value="${(r.materialCod||'').replace(/"/g,'&quot;')}" onchange="onEngPickMat('${blk.key}',${i},this)" ${editavel?'':'disabled'}></td>`;
+    const un=`<td class="muted" id="engun_${blk.key}_${i}" style="text-align:center;white-space:nowrap;font-weight:600">${(engMatUnid(r)||'—').toString().replace(/</g,'&lt;')}</td>`;
     const pad=`<td class="no-print" style="text-align:center"><input type="checkbox" title="Padrão para todos os tamanhos" ${r.padrao?'checked':''} onchange="onEngPadrao('${blk.key}',${i},this)" ${editavel?'':'disabled'}></td>`;
     const del=editavel?`<td class="no-print"><button class="btn sm danger" onclick="engDelRow('${blk.key}',${i})">✕</button></td>`:'';
     const zcls=(zebra && zebra[(r.ref||'').trim()])?' class="zebra"':'';
-    return `<tr${zcls}>${blk.matFirst?mc+colsCells:colsCells+mc}${pad}${del}</tr>`;
+    return `<tr id="engrow_${blk.key}_${i}"${zcls}>${blk.matFirst?mc+un+colsCells:colsCells+mc+un}${pad}${del}</tr>`;
   }).join('');
-  const ncols=blk.cols.length+2;
+  const ncols=blk.cols.length+3;
   return `<div class="card eng-block" id="engblock_${blk.key}" style="margin-bottom:18px">
     <div class="hd">
       <div class="row" style="gap:10px">
@@ -1310,11 +1315,16 @@ function onEngEdit(key,i,colKey,inputEl){ const eng=engCurrent(); if(!eng) retur
     const mm=el('engm2_espumas_'+i); if(mm) mm.textContent=fmtQtd(num(r.compr)*num(r.larg)*num(r.esp)*num(r.quant));
     const qp=el('engqp_espumas_'+i); if(qp) qp.textContent=fmtQtd(num(r.quant)*num(eng.pedido));
     engRecalc();
-  } else if(key==='espumas' && colKey==='ref'){ render(); // muda a densidade → re-zebra
+  } else if(key==='espumas' && colKey==='ref'){ engRezebra(eng); // muda a densidade → re-zebra sem recarregar a página
   } else if(colKey===QTD_KEY[key]){
     const qp=el('engqp_'+key+'_'+i); if(qp) qp.textContent=fmtQtd(rowQuant(key,r)*num(eng.pedido));
     engRecalc();
   }
+}
+function engRezebra(eng){
+  const rows=(eng&&eng.blocos&&eng.blocos.espumas)||[];
+  const map={}; [...new Set(rows.map(x=>(x.ref||'').trim()))].forEach((rf,idx)=>{ map[rf]=idx%2; });
+  rows.forEach((r,i)=>{ const tr=el('engrow_espumas_'+i); if(tr) tr.classList.toggle('zebra', !!map[(r.ref||'').trim()]); });
 }
 function onEngPadrao(key,i,inputEl){ const eng=engCurrent(); if(!eng) return; eng.blocos[key][i].padrao=inputEl.checked; save(); }
 function engRemoverBloco(key){
@@ -1349,6 +1359,12 @@ function engAplicarPadroes(){
   engTocarRevisao(eng); save(); render();
   alert(`Itens padrão aplicados a ${irmaos.length} tamanho(s). ${count} cópia(s) de item atualizada(s).`);
 }
+function engMatUnid(r){
+  if(!r) return '';
+  const m = r.materialId ? matById(r.materialId) : DB.materiais.find(x=>(x.codigo||'').toLowerCase()===(r.materialCod||'').toLowerCase());
+  if(!m) return '';
+  return (m.converter && num(m.fatorConversao)>0 && m.unidadeConsumo) ? m.unidadeConsumo : (m.unidade||'');
+}
 function onEngPickMat(key,i,inputEl){
   const eng=engCurrent(); if(!eng) return;
   const val=inputEl.value.trim();
@@ -1356,6 +1372,7 @@ function onEngPickMat(key,i,inputEl){
   const mat=DB.materiais.find(m=>m.codigo.toLowerCase()===cod.toLowerCase());
   const r=eng.blocos[key][i];
   r.materialCod = mat?mat.codigo:val; r.materialId = mat?mat.id:null;
+  const uc=el('engun_'+key+'_'+i); if(uc) uc.textContent=engMatUnid(r)||'—';
   // preenche a Descrição automaticamente com a descrição do insumo (blocos que têm essa coluna, ex.: Kit Pés)
   const blk=ENG_BLOCOS.find(b=>b.key===key);
   if(mat && blk && blk.cols.some(c=>c[0]==='descricao')) r.descricao=mat.descricao;
