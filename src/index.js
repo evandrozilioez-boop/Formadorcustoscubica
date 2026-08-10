@@ -31,37 +31,6 @@ async function verifyToken(token, env) {
   } catch (e) { return false; }
 }
 
-/* ---------- Verificação do Cloudflare Access (RS256 via JWKS) ---------- */
-let _jwks = null, _jwksAt = 0;
-async function getJwks(team) {
-  const now = Date.now();
-  if (_jwks && (now - _jwksAt) < 3600000) return _jwks;
-  const res = await fetch(`https://${team}.cloudflareaccess.com/cdn-cgi/access/certs`);
-  _jwks = await res.json(); _jwksAt = now; return _jwks;
-}
-// Retorna o e-mail autenticado se o token de Access for válido; senão null.
-async function verifyAccess(token, env) {
-  try {
-    if (!token) return null;
-    const team = env.ACCESS_TEAM, aud = env.ACCESS_AUD;
-    if (!team || !aud) return null; // Access não configurado
-    const parts = token.split('.'); if (parts.length !== 3) return null;
-    const header = b64urlToJson(parts[0]);
-    const jwks = await getJwks(team);
-    const jwk = (jwks.keys || []).find(k => k.kid === header.kid);
-    if (!jwk) return null;
-    const key = await crypto.subtle.importKey('jwk', jwk, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
-    const sig = Uint8Array.from(atob(parts[2].replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
-    const ok = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, sig, enc.encode(parts[0] + '.' + parts[1]));
-    if (!ok) return null;
-    const p = b64urlToJson(parts[1]);
-    if (p.exp && p.exp < Math.floor(Date.now() / 1000)) return null;
-    const auds = Array.isArray(p.aud) ? p.aud : [p.aud];
-    if (!auds.includes(aud)) return null;
-    return p.email || p.sub || 'access-user';
-  } catch (e) { return null; }
-}
-
 /* ---------- Senhas: PBKDF2-SHA256 (Web Crypto) ---------- */
 function bufB64(buf) { let s = ''; const b = new Uint8Array(buf); for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
 function b64Buf(s) { return Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0)); }
@@ -118,22 +87,8 @@ export default {
     if (path.startsWith('/api/')) {
       if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
 
-      // ===== BARREIRA DE SEGURANÇA =====
-      // Em produção toda a API exige Cloudflare Access (identidade verificada).
-      const openMode = env.OPEN_SESSION === '1'; // apenas para testes
-      let accessEmail = null;
-      if (!openMode) {
-        accessEmail = await verifyAccess(request.headers.get('Cf-Access-Jwt-Assertion'), env);
-        if (!accessEmail) {
-          return json({ message: 'Acesso negado. Proteja o site com Cloudflare Access e configure ACCESS_TEAM e ACCESS_AUD.' }, 403);
-        }
-      }
-
-      // GET /api/session → emite o token da aplicação (já autenticado pelo Access)
-      if (path === '/api/session') {
-        const email = accessEmail || request.headers.get('Cf-Access-Authenticated-User-Email') || env.AUTH_EMAIL || 'auto@local';
-        return json({ accessToken: await signToken({ sub: email, email, role: 'admin' }, env), usuario: { email } });
-      }
+      // SEGURANÇA: sem Cloudflare Access. A proteção é o login por senha:
+      // /api/auth/login é público (para logar); todo o resto exige o token JWT.
 
       // POST /api/auth/login → autentica contra a tabela usuarios (senha com hash)
       if (path === '/api/auth/login') {
