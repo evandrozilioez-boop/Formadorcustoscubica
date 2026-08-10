@@ -166,12 +166,24 @@ tbody tr:hover{background:var(--surface-2)}
   .content{padding:0;max-width:none}
   .print-only{display:block}
   .card{box-shadow:none;border:1px solid #ccc}
-  .eng-block{page-break-after:always;break-after:page}
-  .eng-block:last-of-type{page-break-after:auto}
+  /* Blocos fluem um abaixo do outro; cada bloco tenta ficar inteiro numa página */
+  .eng-block{page-break-after:auto;break-after:auto;break-inside:avoid;page-break-inside:avoid;margin-bottom:10px!important}
   .eng-block.skip-print{display:none!important}
   .eng-block .no-print{display:none!important}
   input,select{border:none!important;background:transparent!important;padding:0!important;-webkit-appearance:none;appearance:none}
+
+  /* ===== Impressão da Engenharia: compacta e em paisagem para caber tudo ===== */
+  html.print-eng .eng-block table{width:100%;table-layout:fixed;font-size:8px;border-collapse:collapse}
+  html.print-eng .eng-block th,html.print-eng .eng-block td{padding:1.5px 3px!important;min-width:0!important;white-space:normal;word-break:break-word;overflow:hidden;line-height:1.15}
+  html.print-eng .eng-block input,html.print-eng .eng-block select{font-size:8px!important;width:100%!important;min-width:0!important;line-height:1.15}
+  html.print-eng .eng-block h3{font-size:10.5px!important;margin:0}
+  html.print-eng .eng-block .desc,html.print-eng .eng-block .hint{font-size:7.5px!important}
+  html.print-eng .eng-block .hd{padding:4px 8px!important}
+  html.print-eng .eng-block .bd{padding:0!important}
 }
+/* Paisagem só quando imprimindo a Engenharia (não afeta os outros relatórios) */
+@page engpage{size:A4 landscape;margin:8mm}
+html.print-eng body{page:engpage}
 .app-footer{margin-top:auto;padding:14px 26px;border-top:1px solid var(--border);color:var(--muted);font-size:11.5px;text-align:center;letter-spacing:.2px}
 @media(max-width:760px){.app-footer{padding:12px 14px;font-size:10.5px}}
 </style>
@@ -1115,6 +1127,7 @@ function viewEngenharia(){
     else if(DB.engenharias.length){ engSel=DB.engenharias[0].id; }
   }
   let eng=engCurrent();
+  if(eng && eng.produtoId) engSeedVazias(eng.produtoId); // puxa a composição do 1º tamanho para os vazios
   const curVal = eng ? (eng.produtoId?('P:'+eng.produtoId):('S:'+engSkuKey(eng))) : '';
   const irmaos = eng ? (eng.produtoId?DB.engenharias.filter(e=>e.produtoId===eng.produtoId):DB.engenharias.filter(e=>!e.produtoId&&engSkuKey(e)===engSkuKey(eng))) : [];
   const opts = produtos.map(p=>`<option value="P:${p.id}" ${curVal==='P:'+p.id?'selected':''}>${p.codigo} — ${p.modelo}</option>`).join('')
@@ -1141,7 +1154,8 @@ function viewEngenharia(){
     <div class="sub-tabs" style="margin:0;flex-wrap:wrap">
       ${irmaos.map(e=>`<button class="${e.id===engSel?'active':''}" onclick="engSelId('${e.id}')">${e.tamanho||'sem tamanho'}</button>`).join('')}
     </div>
-    ${editavel&&eng.produtoId&&irmaos.length>1?`<button class="btn sm" onclick="engAplicarPadroes()" title="Copia os itens marcados como Padrão para as fichas dos outros tamanhos">↧ Aplicar itens padrão aos demais tamanhos</button>`:''}
+    ${editavel&&eng.produtoId&&irmaos.length>1?`<button class="btn primary sm" onclick="engReplicarComposicao()" title="Copia toda a composição deste tamanho para os demais; depois você ajusta dimensões e quantidades em cada um">↧ Replicar composição p/ os demais tamanhos</button>
+    <button class="btn sm" onclick="engAplicarPadroes()" title="Copia apenas os itens marcados como Padrão para as fichas dos outros tamanhos">↧ Só itens padrão</button>`:''}
   </div>`;
   h+=`<div class="card no-print" style="margin-bottom:18px"><div class="hd"><div><h3>${eng.item||'—'} <span class="tag blue">${eng.sku||'SKU'}</span></h3><div class="desc">Composição do tamanho <b>${eng.tamanho||'—'}</b> · custo automático pela matéria-prima</div></div></div>
     <div class="bd"><div class="grid g-3">
@@ -1172,6 +1186,7 @@ function engCellFor(eng,blk,r,i,c,editavel){
   return `<td><input class="inp" value="${(r[c[0]]==null?'':r[c[0]]).toString().replace(/"/g,'&quot;')}" oninput="onEngEdit('${key}',${i},'${c[0]}',this)" ${editavel?'':'disabled'}></td>`;
 }
 function engBlockCard(eng,blk,idx,editavel){
+  if(blk.key==='madeira' && eng.madeiraOrd) engOrdenaMadeiraArr(eng); // mantém a ordenação salva
   const rows=engBlock(eng,blk.key);
   const matTh='<th>Matéria-prima</th>';
   const unTh='<th title="Unidade de medida do insumo">Un.</th>';
@@ -1197,6 +1212,7 @@ function engBlockCard(eng,blk,idx,editavel){
         <div><h3>${idx+1}. ${blk.label}</h3><div class="desc print-only engprinthead">${engHeadLine(eng)}</div></div>
       </div>
       <div class="row no-print">
+        ${blk.key==='madeira'&&editavel?(()=>{const ord=eng.madeiraOrd||'';const O=[['','↕ Ordenar…'],['larg,compr|asc','Largura ↑ · Compr. A→Z'],['larg,compr|desc','Largura ↓ · Compr. Z→A'],['compr|asc','Comprimento A→Z'],['compr|desc','Comprimento Z→A'],['larg|asc','Largura A→Z'],['larg|desc','Largura Z→A'],['esp|asc','Espessura A→Z'],['esp|desc','Espessura Z→A']];return `<select class="inp sm" style="width:auto" title="Ordenar as linhas (fica salvo)" onchange="engOrdenarMadeira(this.value)">${O.map(([v,l])=>`<option value="${v}" ${ord===v?'selected':''}>${l}</option>`).join('')}</select>${ord?'<span class="muted" style="font-size:11px;white-space:nowrap">✓ ordenação salva</span>':''}`;})():''}
         ${editavel?`<button class="btn sm" onclick="engAddRow('${blk.key}')">＋ Linha</button>`:''}
         <button class="btn sm" onclick="engPrintBloco('${blk.key}')">🖨 Imprimir bloco</button>
         ${editavel?`<button class="btn sm danger" onclick="engRemoverBloco('${blk.key}')" title="Excluir este bloco do SKU (pode restaurar depois)">🗑</button>`:''}
@@ -1360,6 +1376,63 @@ function engAplicarPadroes(){
   engTocarRevisao(eng); save(); render();
   alert(`Itens padrão aplicados a ${irmaos.length} tamanho(s). ${count} cópia(s) de item atualizada(s).`);
 }
+// Uma ficha está "vazia" quando não tem nenhum item nos blocos nem tecido escolhido.
+function engBlocosVazios(eng){
+  if(!eng) return true;
+  const semItens = ENG_BASE.every(b=>((eng.blocos&&eng.blocos[b.key])||[]).length===0);
+  const semTec = (eng.tecidos||[]).every(t=>!t.materialId && !t.materialCod && !num(t.consumo));
+  return semItens && semTec;
+}
+// Ao preencher a engenharia do 1º tamanho, puxa a composição para os tamanhos que ainda estão vazios.
+// Nunca sobrescreve um tamanho que já tenha composição própria.
+function engSeedVazias(pid){
+  const fichas=DB.engenharias.filter(e=>e.produtoId===pid);
+  if(fichas.length<2) return;
+  const fonte=fichas.find(e=>!engBlocosVazios(e)); // 1º tamanho já preenchido
+  if(!fonte) return;
+  let mudou=false;
+  fichas.forEach(sib=>{
+    if(sib.id===fonte.id || !engBlocosVazios(sib)) return;
+    sib.blocos=JSON.parse(JSON.stringify(fonte.blocos||{}));
+    sib.ocultos=fonte.ocultos?JSON.parse(JSON.stringify(fonte.ocultos)):[];
+    if(fonte.tecidos&&fonte.tecidos.length) sib.tecidos=JSON.parse(JSON.stringify(fonte.tecidos));
+    if(fonte.madeiraOrd){ sib.madeiraOrd=fonte.madeiraOrd; engOrdenaMadeiraArr(sib); }
+    mudou=true;
+  });
+  if(mudou) save();
+}
+// Replica manualmente a composição do tamanho atual para TODOS os demais (substitui o que houver).
+function engReplicarComposicao(){
+  const eng=engCurrent(); if(!eng||!eng.produtoId) return;
+  const irmaos=DB.engenharias.filter(e=>e.produtoId===eng.produtoId && e.id!==eng.id);
+  if(!irmaos.length){ alert('Não há outros tamanhos cadastrados para receber a composição.'); return; }
+  if(!confirm(`Copiar a composição do tamanho "${eng.tamanho||'—'}" para os outros ${irmaos.length} tamanho(s)?\nAs composições atuais deles serão substituídas. Você poderá ajustar dimensões e quantidades em cada tamanho depois.`)) return;
+  irmaos.forEach(sib=>{
+    sib.blocos=JSON.parse(JSON.stringify(eng.blocos||{}));
+    sib.ocultos=eng.ocultos?JSON.parse(JSON.stringify(eng.ocultos)):[];
+    if(eng.tecidos&&eng.tecidos.length) sib.tecidos=JSON.parse(JSON.stringify(eng.tecidos));
+    if(eng.madeiraOrd){ sib.madeiraOrd=eng.madeiraOrd; engOrdenaMadeiraArr(sib); }
+    engTocarRevisao(sib);
+  });
+  engTocarRevisao(eng); save(); render();
+  alert(`Composição replicada para ${irmaos.length} tamanho(s). Ajuste as dimensões e quantidades de cada um.`);
+}
+// Ordena o array do bloco Madeiras conforme o critério salvo em eng.madeiraOrd.
+// spec = "campo[,campo2]|asc|desc". Ex.: "larg,compr|asc" agrupa por largura e,
+// dentro de cada largura, ordena o comprimento de A→Z.
+function engOrdenaMadeiraArr(eng){
+  const spec=eng&&eng.madeiraOrd; if(!spec) return;
+  const [fieldsS,dir]=spec.split('|'); const fields=fieldsS.split(','); const mul=(dir==='desc')?-1:1;
+  const arr=(eng.blocos&&eng.blocos.madeira)||[];
+  arr.sort((a,b)=>{ for(const f of fields){ const d=(num(a[f])-num(b[f]))*mul; if(d) return d; } return 0; });
+}
+// Grava o critério de ordenação (para o SKU inteiro) e já reordena todos os tamanhos.
+function engOrdenarMadeira(spec){
+  const eng=engCurrent(); if(!eng) return;
+  const fichas = eng.produtoId ? DB.engenharias.filter(e=>e.produtoId===eng.produtoId) : [eng];
+  fichas.forEach(e=>{ e.madeiraOrd = spec||''; engOrdenaMadeiraArr(e); });
+  engTocarRevisao(eng); save(); render();
+}
 function engMatUnid(r){
   if(!r) return '';
   const m = r.materialId ? matById(r.materialId) : DB.materiais.find(x=>(x.codigo||'').toLowerCase()===(r.materialCod||'').toLowerCase());
@@ -1478,9 +1551,9 @@ function parseEngSheet(M, fname){
   return { id:uid(), produtoId:null, item, sku, tamanho, tecidos:[], pedido:cell(6,4), lote:cell(6,7), revpor:cell(3,3), criacao:cell(3,7), ultrev:cell(4,7), blocos:B };
 }
 function engSyncSkip(){ document.querySelectorAll('.engchk').forEach(c=>{ const b=el('engblock_'+c.dataset.key); if(b) b.classList.toggle('skip-print', !c.checked); }); }
-function engPrintSelecionados(){ if(!document.querySelector('.engchk:checked')){ alert('Selecione ao menos um bloco.'); return; } engSyncSkip(); window.print(); }
-function engPrintTodos(){ document.querySelectorAll('.eng-block').forEach(b=>b.classList.remove('skip-print')); window.print(); }
-function engPrintBloco(key){ document.querySelectorAll('.eng-block').forEach(b=>b.classList.toggle('skip-print', b.id!=='engblock_'+key)); window.print(); }
+function engPrintSelecionados(){ if(!document.querySelector('.engchk:checked')){ alert('Selecione ao menos um bloco.'); return; } engSyncSkip(); document.documentElement.classList.add('print-eng'); window.print(); }
+function engPrintTodos(){ document.querySelectorAll('.eng-block').forEach(b=>b.classList.remove('skip-print')); document.documentElement.classList.add('print-eng'); window.print(); }
+function engPrintBloco(key){ document.querySelectorAll('.eng-block').forEach(b=>b.classList.toggle('skip-print', b.id!=='engblock_'+key)); document.documentElement.classList.add('print-eng'); window.print(); }
 
 /* ============================================================
    PRODUTOS
@@ -2047,7 +2120,7 @@ function toggleTheme(){
 }
 document.getElementById('nav').addEventListener('click',e=>{const b=e.target.closest('button[data-view]');if(b)nav(b.dataset.view);});
 el('lgPass').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
-window.addEventListener('afterprint',()=>document.querySelectorAll('.eng-block').forEach(b=>b.classList.remove('skip-print')));
+window.addEventListener('afterprint',()=>{document.querySelectorAll('.eng-block').forEach(b=>b.classList.remove('skip-print'));document.documentElement.classList.remove('print-eng');});
 // Conecta automaticamente ao servidor, se já configurado
 cloudAutoStart();
 </script>
