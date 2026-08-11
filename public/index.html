@@ -158,6 +158,7 @@ tbody tr:hover{background:var(--surface-2)}
 .add-row{display:flex;gap:8px;margin-top:8px}
 .eng-tot{text-align:right;font-variant-numeric:tabular-nums}
 .zebra>td{background:rgba(0,0,0,.07)!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.eng-pend>td{background:rgba(214,48,49,.14)!important;box-shadow:inset 3px 0 0 #d63031}
 .print-only{display:none}
 @media print{
   body{background:#fff}
@@ -170,6 +171,7 @@ tbody tr:hover{background:var(--surface-2)}
   .eng-block{page-break-after:auto;break-after:auto;break-inside:avoid;page-break-inside:avoid;margin-bottom:10px!important}
   .eng-block.skip-print{display:none!important}
   .eng-block .no-print{display:none!important}
+  .eng-pend>td{background:transparent!important;box-shadow:none!important}
   input,select{border:none!important;background:transparent!important;padding:0!important;-webkit-appearance:none;appearance:none}
 
   /* ===== Impressão da Engenharia: compacta e em paisagem para caber tudo ===== */
@@ -1209,9 +1211,10 @@ function engBlockCard(eng,blk,idx,editavel){
     const mc=`<td style="min-width:160px"><input class="inp" list="engMatList" ${(blk.key==='madeira'||blk.key==='espumas')&&i>0&&rows[i-1].materialCod?`placeholder="sugestão: ${(rows[i-1].materialCod||'').replace(/"/g,'&quot;')}" onfocus="engSugereMat('${blk.key}',${i},this)"`:'placeholder="buscar insumo"'} value="${(r.materialCod||'').replace(/"/g,'&quot;')}" onchange="onEngPickMat('${blk.key}',${i},this)" ${editavel?'':'disabled'}></td>`;
     const un=`<td class="muted" id="engun_${blk.key}_${i}" style="text-align:center;white-space:nowrap;font-weight:600">${(engMatUnid(r)||'—').toString().replace(/</g,'&lt;')}</td>`;
     const pad=`<td class="no-print" style="text-align:center"><input type="checkbox" title="Padrão para todos os tamanhos" ${r.padrao?'checked':''} onchange="onEngPadrao('${blk.key}',${i},this)" ${editavel?'':'disabled'}></td>`;
-    const del=editavel?`<td class="no-print"><button class="btn sm danger" onclick="engDelRow('${blk.key}',${i})">✕</button></td>`:'';
-    const zcls=(zebra && zebra[(r.ref||'').trim()])?' class="zebra"':'';
-    return `<tr id="engrow_${blk.key}_${i}"${zcls}>${blk.matFirst?mc+un+colsCells:colsCells+mc+un}${pad}${del}</tr>`;
+    const del=editavel?`<td class="no-print" style="white-space:nowrap">${r._pend?`<button class="btn sm" title="Conferir (tirar destaque vermelho)" onclick="engConferirLinha('${blk.key}',${i})">✓</button> `:''}<button class="btn sm danger" onclick="engDelRow('${blk.key}',${i})">✕</button></td>`:'';
+    const cls=[]; if(zebra && zebra[(r.ref||'').trim()]) cls.push('zebra'); if(r._pend) cls.push('eng-pend');
+    const clsAttr=cls.length?` class="${cls.join(' ')}"`:'';
+    return `<tr id="engrow_${blk.key}_${i}"${clsAttr}>${blk.matFirst?mc+un+colsCells:colsCells+mc+un}${pad}${del}</tr>`;
   }).join('');
   const ncols=blk.cols.length+3;
   return `<div class="card eng-block" id="engblock_${blk.key}" style="margin-bottom:18px">
@@ -1221,7 +1224,7 @@ function engBlockCard(eng,blk,idx,editavel){
         <div><h3>${idx+1}. ${blk.label}</h3><div class="desc print-only engprinthead">${engHeadLine(eng)}</div></div>
       </div>
       <div class="row no-print">
-        ${blk.key==='madeira'&&editavel?(()=>{const ord=eng.madeiraOrd||'';const O=[['','↕ Ordenar…'],['larg,compr|asc','Largura ↑ · Compr. A→Z'],['larg,compr|desc','Largura ↓ · Compr. Z→A'],['compr|asc','Comprimento A→Z'],['compr|desc','Comprimento Z→A'],['larg|asc','Largura A→Z'],['larg|desc','Largura Z→A'],['esp|asc','Espessura A→Z'],['esp|desc','Espessura Z→A']];return `<select class="inp sm" style="width:auto" title="Ordenar as linhas (fica salvo)" onchange="engOrdenarMadeira(this.value)">${O.map(([v,l])=>`<option value="${v}" ${ord===v?'selected':''}>${l}</option>`).join('')}</select>${ord?'<span class="muted" style="font-size:11px;white-space:nowrap">✓ ordenação salva</span>':''}`;})():''}
+        ${blk.key==='madeira'&&editavel?(()=>{const ord=eng.madeiraOrd||'';const O=[['','↕ Ordenar…'],['larg,compr|asc','Largura ↑ · Compr. A→Z'],['larg,compr|desc','Largura ↓ · Compr. Z→A'],['compr:desc,larg:asc','Comprimento Z→A · Largura A→Z'],['compr|asc','Comprimento A→Z'],['compr|desc','Comprimento Z→A'],['larg|asc','Largura A→Z'],['larg|desc','Largura Z→A'],['esp|asc','Espessura A→Z'],['esp|desc','Espessura Z→A']];return `<select class="inp sm" style="width:auto" title="Ordenar as linhas (fica salvo)" onchange="engOrdenarMadeira(this.value)">${O.map(([v,l])=>`<option value="${v}" ${ord===v?'selected':''}>${l}</option>`).join('')}</select>${ord?'<span class="muted" style="font-size:11px;white-space:nowrap">✓ ordenação salva</span>':''}`;})():''}
         ${editavel?`<button class="btn sm" onclick="engAddRow('${blk.key}')">＋ Linha</button>`:''}
         <button class="btn sm" onclick="engPrintBloco('${blk.key}')">🖨 Imprimir bloco</button>
         ${editavel?`<button class="btn sm danger" onclick="engRemoverBloco('${blk.key}')" title="Excluir este bloco do SKU (pode restaurar depois)">🗑</button>`:''}
@@ -1321,6 +1324,7 @@ function engRecalc(){
 }
 function onEngEdit(key,i,colKey,inputEl){ const eng=engCurrent(); if(!eng) return; eng.blocos[key][i][colKey]=inputEl.value; engTocarRevisao(eng); save();
   const r=eng.blocos[key][i];
+  if(r._pend){ r._pend=false; const tr=el('engrow_'+key+'_'+i); if(tr){ tr.classList.remove('eng-pend'); const b=tr.querySelector('button[title^="Conferir"]'); if(b) b.remove(); } }
   if(key==='papelao' && (colKey==='compr'||colKey==='larg'||colKey==='quant')){
     const tc=el('engtch_papelao_'+i); if(tc) tc.textContent=fmtQtd(num(r.compr)*num(r.larg)*num(r.quant));
     engRecalc();
@@ -1385,6 +1389,15 @@ function engAplicarPadroes(){
   engTocarRevisao(eng); save(); render();
   alert(`Itens padrão aplicados a ${irmaos.length} tamanho(s). ${count} cópia(s) de item atualizada(s).`);
 }
+// Marca todas as linhas dos blocos como "a conferir" (destaque vermelho por tamanho).
+function engMarcarPendentes(eng){ if(!eng||!eng.blocos) return; Object.keys(eng.blocos).forEach(k=>{ (eng.blocos[k]||[]).forEach(r=>{ r._pend=true; }); }); }
+// Tira o destaque de uma linha (conferida) sem recarregar a tela.
+function engConferirLinha(key,i){
+  const eng=engCurrent(); if(!eng) return;
+  const r=(eng.blocos[key]||[])[i]; if(!r) return;
+  r._pend=false; save();
+  const tr=el('engrow_'+key+'_'+i); if(tr){ tr.classList.remove('eng-pend'); const b=tr.querySelector('button[title^="Conferir"]'); if(b) b.remove(); }
+}
 // Uma ficha está "vazia" quando não tem nenhum item nos blocos nem tecido escolhido.
 function engBlocosVazios(eng){
   if(!eng) return true;
@@ -1403,6 +1416,7 @@ function engSeedVazias(pid){
   fichas.forEach(sib=>{
     if(sib.id===fonte.id || !engBlocosVazios(sib)) return;
     sib.blocos=JSON.parse(JSON.stringify(fonte.blocos||{}));
+    engMarcarPendentes(sib); // destaca em vermelho até conferir/alterar em cada tamanho
     sib.ocultos=fonte.ocultos?JSON.parse(JSON.stringify(fonte.ocultos)):[];
     if(fonte.tecidos&&fonte.tecidos.length) sib.tecidos=JSON.parse(JSON.stringify(fonte.tecidos));
     if(fonte.madeiraOrd){ sib.madeiraOrd=fonte.madeiraOrd; engOrdenaMadeiraArr(sib); }
@@ -1418,6 +1432,7 @@ function engReplicarComposicao(){
   if(!confirm(`Copiar a composição do tamanho "${eng.tamanho||'—'}" para os outros ${irmaos.length} tamanho(s)?\nAs composições atuais deles serão substituídas. Você poderá ajustar dimensões e quantidades em cada tamanho depois.`)) return;
   irmaos.forEach(sib=>{
     sib.blocos=JSON.parse(JSON.stringify(eng.blocos||{}));
+    engMarcarPendentes(sib); // destaca em vermelho até conferir/alterar em cada tamanho
     sib.ocultos=eng.ocultos?JSON.parse(JSON.stringify(eng.ocultos)):[];
     if(eng.tecidos&&eng.tecidos.length) sib.tecidos=JSON.parse(JSON.stringify(eng.tecidos));
     if(eng.madeiraOrd){ sib.madeiraOrd=eng.madeiraOrd; engOrdenaMadeiraArr(sib); }
@@ -1431,9 +1446,15 @@ function engReplicarComposicao(){
 // dentro de cada largura, ordena o comprimento de A→Z.
 function engOrdenaMadeiraArr(eng){
   const spec=eng&&eng.madeiraOrd; if(!spec) return;
-  const [fieldsS,dir]=spec.split('|'); const fields=fieldsS.split(','); const mul=(dir==='desc')?-1:1;
+  let parts;
+  if(spec.includes(':')){ // formato por campo: "compr:desc,larg:asc"
+    parts=spec.split(',').map(s=>{ const[f,d]=s.split(':'); return {f, mul:(d==='desc'?-1:1)}; });
+  } else { // formato antigo: "larg,compr|asc" (uma direção para todos)
+    const [fieldsS,dir]=spec.split('|'); const mul=(dir==='desc')?-1:1;
+    parts=fieldsS.split(',').map(f=>({f, mul}));
+  }
   const arr=(eng.blocos&&eng.blocos.madeira)||[];
-  arr.sort((a,b)=>{ for(const f of fields){ const d=(num(a[f])-num(b[f]))*mul; if(d) return d; } return 0; });
+  arr.sort((a,b)=>{ for(const p of parts){ const d=(num(a[p.f])-num(b[p.f]))*p.mul; if(d) return d; } return 0; });
 }
 // Grava o critério de ordenação (para o SKU inteiro) e já reordena todos os tamanhos.
 function engOrdenarMadeira(spec){
@@ -1455,6 +1476,7 @@ function onEngPickMat(key,i,inputEl){
   const mat=DB.materiais.find(m=>m.codigo.toLowerCase()===cod.toLowerCase());
   const r=eng.blocos[key][i];
   r.materialCod = mat?mat.codigo:val; r.materialId = mat?mat.id:null;
+  if(r._pend) r._pend=false; // trocar o insumo também confere a linha
   const uc=el('engun_'+key+'_'+i); if(uc) uc.textContent=engMatUnid(r)||'—';
   // preenche a Descrição automaticamente com a descrição do insumo (blocos que têm essa coluna, ex.: Kit Pés)
   const blk=ENG_BLOCOS.find(b=>b.key===key);
