@@ -170,7 +170,51 @@ export default {
           }
           if (request.method === 'PUT') {
             let body; try { body = await request.json(); } catch (e) { return json({ message: 'JSON inválido' }, 400); }
-            const key = body.chave || chave; const data = body.data || {};
+            const key = body.chave || chave;
+
+            // ---- Modo MERGE: combina só os registros que o usuário mudou (vários usuários ao mesmo tempo) ----
+            if (body.merge) {
+              const keys = body.merge.keys || {};
+              const delta = body.merge.delta || {};
+              const updatedAt = await sql.begin(async (sql) => {
+                const rows = await sql`SELECT data FROM app_state WHERE chave = ${key} FOR UPDATE`;
+                let state = (rows[0] && rows[0].data && typeof rows[0].data === 'object') ? rows[0].data : {};
+                // upserts por chave de registro
+                const ups = delta.upserts || {};
+                for (const col in ups) {
+                  const kf = keys[col] || 'id';
+                  if (!Array.isArray(state[col])) state[col] = [];
+                  const idx = {}; state[col].forEach((r, i) => { if (r && r[kf] != null) idx[r[kf]] = i; });
+                  for (const rec of ups[col]) {
+                    const k = rec ? rec[kf] : null;
+                    if (k != null && idx[k] != null) state[col][idx[k]] = rec;
+                    else { state[col].push(rec); if (k != null) idx[k] = state[col].length - 1; }
+                  }
+                }
+                // deleções por chave de registro
+                const dels = delta.deletes || {};
+                for (const col in dels) {
+                  const kf = keys[col] || 'id';
+                  if (Array.isArray(state[col])) {
+                    const rm = new Set((dels[col] || []).map(String));
+                    state[col] = state[col].filter((r) => !(r && rm.has(String(r[kf]))));
+                  }
+                }
+                // campos avulsos (último a salvar vence)
+                const sc = delta.scalars || {};
+                for (const k in sc) state[k] = sc[k];
+                const w = await sql`
+                  INSERT INTO app_state (chave, data, "updatedAt")
+                  VALUES (${key}, ${sql.json(state)}, now())
+                  ON CONFLICT (chave) DO UPDATE SET data = EXCLUDED.data, "updatedAt" = now()
+                  RETURNING "updatedAt"`;
+                return w[0].updatedAt;
+              });
+              return json({ chave: key, updatedAt });
+            }
+
+            // ---- Modo COMPLETO: substitui todo o estado (migração/backup/forçar envio) ----
+            const data = body.data || {};
             const rows = await sql`
               INSERT INTO app_state (chave, data, "updatedAt")
               VALUES (${key}, ${sql.json(data)}, now())

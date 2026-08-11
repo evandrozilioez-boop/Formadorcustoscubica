@@ -335,6 +335,31 @@ const CLOUD_PENDING_KEY='precificador_pending'; // '1' enquanto houver mudança 
 function setPending(v){ try{ localStorage.setItem(CLOUD_PENDING_KEY, v?'1':'0'); }catch(e){} }
 function hasPending(){ try{ return localStorage.getItem(CLOUD_PENDING_KEY)==='1'; }catch(e){ return false; } }
 let cloudState={connected:false, timer:null, dirty:false, pushing:false, since:0, updatedAt:null, pollTimer:null, applying:false, lastPushAt:0};
+/* ---- Merge por registro (vários usuários ao mesmo tempo sem perder dados) ---- */
+// Coleções (listas) sincronizadas por chave de registro, e campos "avulsos" (último a salvar vence).
+const MERGE_KEYS={ produtos:'id', engenharias:'id', materiais:'id', markups:'id', fretes:'id', usuarios:'id', perfis:'key', tabelasPreco:'id', historico:'id' };
+const MERGE_SCALARS=['empresa','taxes','desp','comissao','margemAlvo','margemMin','margem','markupAtivo','menuPerms','tpCfg'];
+let cloudBase=null; // cópia do último estado em sincronia com o banco (referência para calcular o que mudou)
+function snap(o){ try{ return JSON.parse(JSON.stringify(o)); }catch(e){ return {}; } }
+function setBase(){ cloudBase=snap(DB); }
+// Calcula só o que este usuário mudou desde a última sincronia.
+function computeDelta(cur){
+  const base=cloudBase||{}; const delta={upserts:{}, deletes:{}, scalars:{}};
+  for(const col in MERGE_KEYS){
+    const key=MERGE_KEYS[col];
+    const arr=Array.isArray(cur[col])?cur[col]:[];
+    const bas=Array.isArray(base[col])?base[col]:[];
+    const basMap={}; bas.forEach(r=>{ if(r&&r[key]!=null) basMap[r[key]]=JSON.stringify(r); });
+    const ids=new Set(); const ups=[];
+    arr.forEach(r=>{ if(!r||r[key]==null) return; ids.add(String(r[key])); const s=JSON.stringify(r); if(basMap[r[key]]!==s) ups.push(r); });
+    const dels=[]; bas.forEach(r=>{ if(r&&r[key]!=null && !ids.has(String(r[key]))) dels.push(r[key]); });
+    if(ups.length) delta.upserts[col]=ups;
+    if(dels.length) delta.deletes[col]=dels;
+  }
+  for(const k of MERGE_SCALARS){ if(JSON.stringify(cur[k])!==JSON.stringify(base[k])) delta.scalars[k]=cur[k]; }
+  return delta;
+}
+function deltaVazio(d){ return !Object.keys(d.upserts).length && !Object.keys(d.deletes).length && !Object.keys(d.scalars).length; }
 let cloudMemToken=''; // fallback em memória (caso o navegador bloqueie o armazenamento)
 function cloudCfg(){ try{ return JSON.parse(localStorage.getItem(CLOUD_KEY))||{}; }catch(e){ return {}; } }
 // Persiste APENAS url e e-mail. A SENHA NUNCA é gravada no navegador.
@@ -390,10 +415,10 @@ async function cloudSyncOnLogin(){
   let server=null;
   try{ const res=await cloudApi('/api/state?chave=default'); if(res.ok){ const j=await res.json(); server=(j&&j.data)?j.data:null; if(j&&j.updatedAt) cloudState.updatedAt=j.updatedAt; } }catch(e){}
   const ls=dbScore(DB), ss=dbScore(server);
-  if(!server){ await cloudPush(true); }              // banco vazio → migra local
-  else if(hasPending() && ls>0 && ls>=ss){ await cloudPush(true); } // havia mudança local não confirmada → NÃO perde: sobe o local
-  else if(!jaMigrou() && ls>ss){ await cloudPush(true); } // 1ª vez e local mais rico → migra local
-  else { DB=server; ensureDBDefaults(); try{ localStorage.setItem(DB_KEY, JSON.stringify(DB)); }catch(e){} } // usa o banco
+  if(!server){ await cloudPushFull(); }              // banco vazio → migra local
+  else if(hasPending() && ls>0 && ls>=ss){ await cloudPushFull(); } // havia mudança local não confirmada → NÃO perde: sobe o local
+  else if(!jaMigrou() && ls>ss){ await cloudPushFull(); } // 1ª vez e local mais rico → migra local
+  else { DB=server; ensureDBDefaults(); try{ localStorage.setItem(DB_KEY, JSON.stringify(DB)); }catch(e){} setBase(); } // usa o banco
   marcarMigrado();
   if(SESSION) render();
 }
@@ -401,7 +426,7 @@ async function cloudSyncOnLogin(){
 async function cloudForcarMigracao(){
   if(!cloudGetToken() || !cloudState.connected){ alert('Entre no sistema com seu usuário para conectar ao banco.'); return; }
   if(!confirm('Enviar os dados deste navegador para o banco?\nIsso substitui o que estiver no banco pelos dados atuais desta tela.')) return;
-  try{ await cloudPush(true); marcarMigrado(); setCloudStatus('salvo','var(--green)'); alert('Dados enviados para o banco com sucesso.'); }
+  try{ await cloudPushFull(); marcarMigrado(); alert('Dados enviados para o banco com sucesso.'); }
   catch(e){ alert('Falha ao enviar: '+(e&&e.message||e)); }
 }
 // Salvamento em tempo (quase) real: agenda um push curtíssimo após cada alteração,
@@ -416,38 +441,51 @@ function cloudMarkDirty(){
   const espera = (Date.now()-cloudState.since>2000) ? 0 : 350; // no máx ~2s após a 1ª mudança
   cloudState.timer=setTimeout(()=>cloudPush(false), espera);
 }
+// Envio incremental: manda só os registros que ESTE usuário mudou; o banco combina
+// com o que os outros salvaram (merge por registro) → ninguém perde o trabalho do outro.
 async function cloudPush(immediate){
   if(!cloudState.connected && !immediate) return;
   if(!cloudGetToken()) return;
   if(cloudState.pushing){ cloudState.dirty=true; return; } // já há um envio em andamento
+  const sent=snap(DB); const delta=computeDelta(sent);
+  if(deltaVazio(delta)){ cloudState.dirty=false; cloudState.since=0; setPending(false); return; }
   cloudState.pushing=true; cloudState.dirty=false; cloudState.since=0;
-  const body=JSON.stringify({chave:'default',data:DB});
   try{
     setCloudStatus('salvando…','var(--amber)');
-    const res=await cloudApi('/api/state',{method:'PUT',body});
+    const res=await cloudApi('/api/state',{method:'PUT',body:JSON.stringify({chave:'default',merge:{keys:MERGE_KEYS,delta}})});
     if(!res.ok) throw new Error('HTTP '+res.status);
-    try{ const j=await res.json(); if(j&&j.updatedAt) cloudState.updatedAt=j.updatedAt; }catch(e){} // evita auto-pull do próprio envio
+    try{ const j=await res.json(); if(j&&j.updatedAt) cloudState.updatedAt=j.updatedAt; }catch(e){}
+    cloudBase=sent;                 // o que enviamos passa a ser a referência
     cloudState.lastPushAt=Date.now();
-    if(!cloudState.dirty) setPending(false); // confirmado no banco (se não surgiu nova mudança durante o envio)
+    if(!cloudState.dirty) setPending(false); // confirmado no banco
     setCloudStatus('salvo','var(--green)');
   }catch(e){
-    // Não perde a alteração: remarca como pendente e tenta de novo em 1,5s.
-    cloudState.dirty=true; setCloudStatus('salvando…','var(--amber)');
+    cloudState.dirty=true; setPending(true); setCloudStatus('salvando…','var(--amber)');
     clearTimeout(cloudState.timer); cloudState.timer=setTimeout(()=>cloudPush(false), 1500);
   }finally{
     cloudState.pushing=false;
     if(cloudState.dirty && cloudState.connected){ clearTimeout(cloudState.timer); cloudState.timer=setTimeout(()=>cloudPush(false), 300); }
   }
 }
+// Envio COMPLETO (substitui tudo no banco): usado só na 1ª migração, no botão de forçar e na restauração de backup.
+async function cloudPushFull(){
+  if(!cloudGetToken()) throw new Error('sem sessão');
+  const res=await cloudApi('/api/state',{method:'PUT',body:JSON.stringify({chave:'default',data:DB})});
+  if(!res.ok) throw new Error('HTTP '+res.status);
+  try{ const j=await res.json(); if(j&&j.updatedAt) cloudState.updatedAt=j.updatedAt; }catch(e){}
+  setBase(); cloudState.lastPushAt=Date.now(); cloudState.dirty=false; setPending(false);
+  setCloudStatus('salvo','var(--green)');
+}
 // Ao fechar/ocultar a aba: envia o que ainda estiver pendente (keepalive permite concluir após sair).
 function cloudFlushSync(){
   try{
     if(!cloudState.connected || !cloudGetToken()) return;
-    if(!cloudState.dirty && !cloudState.pushing) return;
+    const delta=computeDelta(DB);
+    if(deltaVazio(delta)) return;
     fetch(cloudUrl()+'/api/state',{method:'PUT',keepalive:true,
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+cloudGetToken()},
-      body:JSON.stringify({chave:'default',data:DB})});
-    cloudState.dirty=false;
+      body:JSON.stringify({chave:'default',merge:{keys:MERGE_KEYS,delta}})});
+    // Não limpamos a pendência aqui: se o keepalive falhar, o próximo login reenvia.
   }catch(e){}
 }
 window.addEventListener('pagehide', cloudFlushSync);
@@ -477,6 +515,7 @@ async function cloudPoll(){
     cloudState.updatedAt=j.updatedAt;
     cloudState.applying=true;                 // aplica sem disparar novo envio
     DB=j.data; ensureDBDefaults(); try{ localStorage.setItem(DB_KEY, JSON.stringify(DB)); }catch(e){}
+    setBase();                                // sincronizado com o banco → nova referência
     if(SESSION) render();
     cloudState.applying=false;
     setCloudStatus('atualizado','var(--green)');
@@ -2032,7 +2071,7 @@ function backupImportarArquivo(input){
     const quando = (j && j._geradoEm) ? new Date(j._geradoEm).toLocaleString('pt-BR') : 'data desconhecida';
     if(!confirm('Restaurar o backup de '+quando+'?\n\nTODOS os dados atuais serão substituídos pelos do arquivo. Esta ação não pode ser desfeita.')){ input.value=''; return; }
     DB=dados; ensureDBDefaults(); save();
-    try{ if(cloudState.connected){ marcarMigrado(); cloudPush(true); } }catch(e){}
+    try{ if(cloudState.connected){ marcarMigrado(); cloudPushFull(); } }catch(e){}
     input.value='';
     alert('Backup restaurado com sucesso.');
     render();
