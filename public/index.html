@@ -360,6 +360,14 @@ function computeDelta(cur){
   return delta;
 }
 function deltaVazio(d){ return !Object.keys(d.upserts).length && !Object.keys(d.deletes).length && !Object.keys(d.scalars).length; }
+// Aplica um delta sobre o DB local (mesma lógica do servidor) — usado para reaplicar edições feitas durante o envio.
+function applyDeltaLocal(delta){
+  for(const col in (delta.upserts||{})){ const k=MERGE_KEYS[col]||'id'; if(!Array.isArray(DB[col])) DB[col]=[];
+    const idx={}; DB[col].forEach((r,i)=>{ if(r&&r[k]!=null) idx[r[k]]=i; });
+    for(const rec of delta.upserts[col]){ const kk=rec?rec[k]:null; if(kk!=null&&idx[kk]!=null) DB[col][idx[kk]]=rec; else { DB[col].push(rec); if(kk!=null) idx[kk]=DB[col].length-1; } } }
+  for(const col in (delta.deletes||{})){ const k=MERGE_KEYS[col]||'id'; if(Array.isArray(DB[col])){ const rm=new Set(delta.deletes[col].map(String)); DB[col]=DB[col].filter(r=>!(r&&rm.has(String(r[k])))); } }
+  for(const kk in (delta.scalars||{})) DB[kk]=delta.scalars[kk];
+}
 let cloudMemToken=''; // fallback em memória (caso o navegador bloqueie o armazenamento)
 function cloudCfg(){ try{ return JSON.parse(localStorage.getItem(CLOUD_KEY))||{}; }catch(e){ return {}; } }
 // Persiste APENAS url e e-mail. A SENHA NUNCA é gravada no navegador.
@@ -454,10 +462,27 @@ async function cloudPush(immediate){
     setCloudStatus('salvando…','var(--amber)');
     const res=await cloudApi('/api/state',{method:'PUT',body:JSON.stringify({chave:'default',merge:{keys:MERGE_KEYS,delta}})});
     if(!res.ok) throw new Error('HTTP '+res.status);
-    try{ const j=await res.json(); if(j&&j.updatedAt) cloudState.updatedAt=j.updatedAt; }catch(e){}
-    cloudBase=sent;                 // o que enviamos passa a ser a referência
+    let j=null; try{ j=await res.json(); }catch(e){}
     cloudState.lastPushAt=Date.now();
-    if(!cloudState.dirty) setPending(false); // confirmado no banco
+    if(j && j.updatedAt) cloudState.updatedAt=j.updatedAt;
+    if(j && j.data){
+      // O servidor devolveu o estado MESCLADO (com o que os outros salvaram).
+      // Adota esse estado e reaplica por cima as edições que você fez DURANTE o envio.
+      const inflight=computeDelta(DB, sent);
+      const antes=JSON.stringify(DB);
+      cloudState.applying=true;
+      DB=snap(j.data); ensureDBDefaults();
+      applyDeltaLocal(inflight);
+      try{ localStorage.setItem(DB_KEY, JSON.stringify(DB)); }catch(e){}
+      cloudState.applying=false;
+      cloudBase=snap(j.data);        // referência = estado do banco (limpo)
+      cloudState.dirty=!deltaVazio(inflight);
+      if(!cloudState.dirty) setPending(false);
+      if(JSON.stringify(DB)!==antes){ if(editando()) cloudState.needsRender=true; else if(SESSION) render(); }
+    } else {
+      cloudBase=sent;               // fallback (servidor antigo): o que enviamos vira referência
+      if(!cloudState.dirty) setPending(false);
+    }
     setCloudStatus('salvo','var(--green)');
   }catch(e){
     cloudState.dirty=true; setPending(true); setCloudStatus('salvando…','var(--amber)');
@@ -497,20 +522,23 @@ document.addEventListener('focusout', ()=>{ if(cloudState.connected && (cloudSta
 // ===== Sincronização em tempo real entre usuários (estilo planilha) =====
 // A cada poucos segundos verifica se o banco mudou; se mudou e você NÃO tem alterações
 // pendentes nem está digitando, traz o estado novo e re-renderiza a tela.
+function editando(){ const ae=document.activeElement; return !!(ae && /^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName)); }
 async function cloudPoll(){
   if(!cloudState.connected || !cloudGetToken()) return;
-  if(cloudState.dirty || cloudState.pushing || hasPending()) return; // há mudanças locais → seu envio tem prioridade
+  // Se houve atualização de outro usuário enquanto você digitava, mostra agora que você parou.
+  if(cloudState.needsRender && !editando() && !cloudState.dirty && !cloudState.pushing){ cloudState.needsRender=false; if(SESSION) render(); }
+  // VIGIA: se há algo pendente e nada sendo enviado, garante o envio (mesmo que um timer tenha se perdido).
+  if(!cloudState.pushing && (cloudState.dirty || hasPending())){ cloudPush(true); return; }
   if(Date.now()-(cloudState.lastPushAt||0) < 4000) return; // acabou de salvar → não arrisca reverter com leitura defasada
-  if(document.hidden) return;
-  const ae=document.activeElement;
-  if(ae && /^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName)) return; // você está digitando → não interrompe
+  if(document.hidden || editando()) return; // você está digitando → não interrompe
   try{
     const res=await cloudApi('/api/state?chave=default');
     if(!res.ok) return;
     const j=await res.json();
     if(!j || !j.updatedAt || !j.data) return;
-    // Só aceita se o estado do banco for ESTRITAMENTE mais novo que o nosso último.
-    // Isso evita que uma leitura defasada (cache) reverta a sua edição.
+    // RECHECA após a leitura: se você começou a editar durante a rede, NÃO sobrescreve.
+    if(cloudState.dirty || cloudState.pushing || hasPending() || editando()) return;
+    // Só aceita se o estado do banco for ESTRITAMENTE mais novo que o nosso último (evita reverter por leitura defasada/cache).
     if(cloudState.updatedAt && new Date(j.updatedAt) <= new Date(cloudState.updatedAt)) return;
     cloudState.updatedAt=j.updatedAt;
     cloudState.applying=true;                 // aplica sem disparar novo envio

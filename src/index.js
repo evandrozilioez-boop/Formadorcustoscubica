@@ -176,7 +176,7 @@ export default {
             if (body.merge) {
               const keys = body.merge.keys || {};
               const delta = body.merge.delta || {};
-              const updatedAt = await sql.begin(async (sql) => {
+              const result = await sql.begin(async (sql) => {
                 const rows = await sql`SELECT data FROM app_state WHERE chave = ${key} FOR UPDATE`;
                 let state = (rows[0] && rows[0].data && typeof rows[0].data === 'object') ? rows[0].data : {};
                 // upserts por chave de registro
@@ -208,9 +208,10 @@ export default {
                   VALUES (${key}, ${sql.json(state)}, now())
                   ON CONFLICT (chave) DO UPDATE SET data = EXCLUDED.data, "updatedAt" = now()
                   RETURNING "updatedAt"`;
-                return w[0].updatedAt;
+                return { updatedAt: w[0].updatedAt, state };
               });
-              return json({ chave: key, updatedAt });
+              // Devolve o estado MESCLADO para o cliente convergir imediatamente.
+              return json({ chave: key, updatedAt: result.updatedAt, data: result.state });
             }
 
             // ---- Modo COMPLETO: substitui todo o estado (migração/backup/forçar envio) ----
