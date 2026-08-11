@@ -331,15 +331,27 @@ function resetDB(){ if(confirm('Limpar todos os dados? Isso apaga produtos e his
 const CLOUD_KEY='precificador_cloud';
 const CLOUD_TOKEN_KEY='precificador_token';
 const CLOUD_MIGR_KEY='precificador_migrado_v1'; // marca que o cache local já subiu para o banco
-let cloudState={connected:false, timer:null, dirty:false, pushing:false, since:0};
+const CLOUD_PENDING_KEY='precificador_pending'; // '1' enquanto houver mudança local ainda não confirmada no banco
+function setPending(v){ try{ localStorage.setItem(CLOUD_PENDING_KEY, v?'1':'0'); }catch(e){} }
+function hasPending(){ try{ return localStorage.getItem(CLOUD_PENDING_KEY)==='1'; }catch(e){ return false; } }
+let cloudState={connected:false, timer:null, dirty:false, pushing:false, since:0, updatedAt:null, pollTimer:null, applying:false};
 let cloudMemToken=''; // fallback em memória (caso o navegador bloqueie o armazenamento)
 function cloudCfg(){ try{ return JSON.parse(localStorage.getItem(CLOUD_KEY))||{}; }catch(e){ return {}; } }
 // Persiste APENAS url e e-mail. A SENHA NUNCA é gravada no navegador.
 function cloudSetCfg(c){ try{ localStorage.setItem(CLOUD_KEY, JSON.stringify({ url:(c.url||'').trim(), email:(c.email||'').trim() })); }catch(e){} }
 function cloudUrl(){ const u=(cloudCfg().url||'').trim().replace(/\/+$/,''); if(u) return u; return (location.protocol==='http:'||location.protocol==='https:')?location.origin:''; }
-// Token de sessão: sessionStorage quando permitido, senão memória. Nunca a senha.
-function cloudGetToken(){ try{ const t=sessionStorage.getItem(CLOUD_TOKEN_KEY); if(t) return t; }catch(e){} return cloudMemToken; }
-function cloudSetToken(t){ cloudMemToken=t||''; try{ if(t) sessionStorage.setItem(CLOUD_TOKEN_KEY,t); else sessionStorage.removeItem(CLOUD_TOKEN_KEY); }catch(e){} }
+// Token de sessão: localStorage (mantém o login ao atualizar/reabrir), com fallback em memória. Nunca a senha.
+function cloudGetToken(){ try{ const t=localStorage.getItem(CLOUD_TOKEN_KEY); if(t) return t; }catch(e){} try{ const t=sessionStorage.getItem(CLOUD_TOKEN_KEY); if(t) return t; }catch(e){} return cloudMemToken; }
+function cloudSetToken(t){ cloudMemToken=t||''; try{ if(t) localStorage.setItem(CLOUD_TOKEN_KEY,t); else localStorage.removeItem(CLOUD_TOKEN_KEY); }catch(e){} try{ sessionStorage.removeItem(CLOUD_TOKEN_KEY); }catch(e){} }
+// Lê o conteúdo do JWT (sem validar assinatura) para restaurar a sessão no navegador.
+function jwtPayload(t){ try{ const s=decodeURIComponent(escape(atob(t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')))); return JSON.parse(s); }catch(e){ return null; } }
+function restaurarSessao(){
+  const t=cloudGetToken(); if(!t) return false;
+  const p=jwtPayload(t); if(!p) return false;
+  if(p.exp && p.exp < Math.floor(Date.now()/1000)){ cloudSetToken(''); return false; } // token expirado
+  SESSION={role:p.role||'vendedor', nome:p.nome||p.email||'Usuário', userId:p.sub, email:p.email, admin:!!p.admin};
+  return true;
+}
 function setCloudStatus(txt,color){ const c=el('cloudChip'); if(c){ c.textContent='☁ '+txt; c.style.color=color||'var(--muted)'; c.style.cursor='pointer'; } }
 function cloudIrConectar(){ if(SESSION) nav('config'); }
 
@@ -376,9 +388,10 @@ function marcarMigrado(){ try{ localStorage.setItem(CLOUD_MIGR_KEY,'1'); }catch(
 // (ou quando este navegador tem mais dados e ainda não migrou); senão, usa o banco.
 async function cloudSyncOnLogin(){
   let server=null;
-  try{ const res=await cloudApi('/api/state?chave=default'); if(res.ok){ const j=await res.json(); server=(j&&j.data)?j.data:null; } }catch(e){}
+  try{ const res=await cloudApi('/api/state?chave=default'); if(res.ok){ const j=await res.json(); server=(j&&j.data)?j.data:null; if(j&&j.updatedAt) cloudState.updatedAt=j.updatedAt; } }catch(e){}
   const ls=dbScore(DB), ss=dbScore(server);
   if(!server){ await cloudPush(true); }              // banco vazio → migra local
+  else if(hasPending() && ls>0 && ls>=ss){ await cloudPush(true); } // havia mudança local não confirmada → NÃO perde: sobe o local
   else if(!jaMigrou() && ls>ss){ await cloudPush(true); } // 1ª vez e local mais rico → migra local
   else { DB=server; ensureDBDefaults(); try{ localStorage.setItem(DB_KEY, JSON.stringify(DB)); }catch(e){} } // usa o banco
   marcarMigrado();
@@ -394,6 +407,8 @@ async function cloudForcarMigracao(){
 // Salvamento em tempo (quase) real: agenda um push curtíssimo após cada alteração,
 // mas garante um envio a cada ~2s no máximo mesmo com digitação contínua.
 function cloudMarkDirty(){
+  if(cloudState.applying) return; // mudança veio do próprio pull em tempo real; não reenvia
+  setPending(true); // há algo local ainda não confirmado no banco
   if(!cloudState.connected){ cloudState.dirty=true; return; }
   cloudState.dirty=true;
   if(!cloudState.since) cloudState.since=Date.now();
@@ -411,6 +426,8 @@ async function cloudPush(immediate){
     setCloudStatus('salvando…','var(--amber)');
     const res=await cloudApi('/api/state',{method:'PUT',body});
     if(!res.ok) throw new Error('HTTP '+res.status);
+    try{ const j=await res.json(); if(j&&j.updatedAt) cloudState.updatedAt=j.updatedAt; }catch(e){} // evita auto-pull do próprio envio
+    if(!cloudState.dirty) setPending(false); // confirmado no banco (se não surgiu nova mudança durante o envio)
     setCloudStatus('salvo','var(--green)');
   }catch(e){
     // Não perde a alteração: remarca como pendente e tenta de novo em 1,5s.
@@ -435,13 +452,45 @@ function cloudFlushSync(){
 window.addEventListener('pagehide', cloudFlushSync);
 window.addEventListener('beforeunload', cloudFlushSync);
 document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden') cloudFlushSync(); });
-// No início: conecta sozinho (sem precisar clicar).
+// Ao sair de qualquer campo (pular a linha/campo), envia imediatamente ao banco.
+document.addEventListener('focusout', ()=>{ if(cloudState.connected && (cloudState.dirty || hasPending()) && !cloudState.pushing) cloudPush(true); });
+
+// ===== Sincronização em tempo real entre usuários (estilo planilha) =====
+// A cada poucos segundos verifica se o banco mudou; se mudou e você NÃO tem alterações
+// pendentes nem está digitando, traz o estado novo e re-renderiza a tela.
+async function cloudPoll(){
+  if(!cloudState.connected || !cloudGetToken()) return;
+  if(cloudState.dirty || cloudState.pushing || hasPending()) return; // há mudanças locais → seu envio tem prioridade
+  if(document.hidden) return;
+  const ae=document.activeElement;
+  if(ae && /^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName)) return; // você está digitando → não interrompe
+  try{
+    const res=await cloudApi('/api/state?chave=default');
+    if(!res.ok) return;
+    const j=await res.json();
+    if(!j || !j.updatedAt) return;
+    if(cloudState.updatedAt && j.updatedAt===cloudState.updatedAt) return; // nada novo
+    if(j.data){
+      cloudState.updatedAt=j.updatedAt;
+      cloudState.applying=true;                 // aplica sem disparar novo envio
+      DB=j.data; ensureDBDefaults(); try{ localStorage.setItem(DB_KEY, JSON.stringify(DB)); }catch(e){}
+      if(SESSION) render();
+      cloudState.applying=false;
+      setCloudStatus('atualizado','var(--green)');
+    }
+  }catch(e){ cloudState.applying=false; }
+}
+function startPolling(){ if(cloudState.pollTimer) return; cloudState.pollTimer=setInterval(cloudPoll, 3000); }
+function stopPolling(){ if(cloudState.pollTimer){ clearInterval(cloudState.pollTimer); cloudState.pollTimer=null; } }
+// No início: se há um token válido, entra direto (mantém o login ao atualizar a página).
 async function cloudAutoStart(){
   cloudSetCfg(cloudCfg());
-  // Reaproveita o token da sessão atual (se o usuário já logou nesta aba). O login é quem conecta.
-  if(cloudGetToken()){
-    try{ cloudState.connected=true; await cloudSyncOnLogin(); setCloudStatus('conectado','var(--green)'); return; }
-    catch(e){ cloudSetToken(''); cloudState.connected=false; }
+  if(cloudGetToken() && restaurarSessao()){
+    cloudState.connected=true; setCloudStatus('conectado','var(--green)');
+    entrarApp();              // volta ao app sem pedir login de novo
+    startPolling();
+    try{ await cloudSyncOnLogin(); }catch(e){ /* segue com o cache local */ }
+    return;
   }
   setCloudStatus('offline');
 }
@@ -2212,6 +2261,7 @@ async function doLogin(){
       SESSION={role:(j.usuario.perfil||'vendedor'), nome:j.usuario.nome, userId:j.usuario.id, email:j.usuario.email, admin:!!j.usuario.admin};
       cloudState.connected=true; setCloudStatus('conectado','var(--green)');
       try{ await cloudSyncOnLogin(); }catch(e){}
+      startPolling();
       entrarApp(); return;
     }catch(e){ /* servidor indisponível → tenta modo offline abaixo */ }
   }
@@ -2233,7 +2283,7 @@ function entrarApp(){
   applyMenuPerms();
   nav(firstAllowedView()||'dashboard');
 }
-function logout(){SESSION=null;el('appRoot').classList.add('hidden');el('loginScreen').classList.remove('hidden');}
+function logout(){ cloudFlushSync(); SESSION=null; cloudSetToken(''); cloudState.connected=false; stopPolling(); setCloudStatus('offline'); el('appRoot').classList.add('hidden'); el('loginScreen').classList.remove('hidden'); }
 function toggleTheme(){
   const d=document.documentElement.getAttribute('data-theme')==='dark';
   document.documentElement.setAttribute('data-theme',d?'light':'dark');
