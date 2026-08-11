@@ -326,6 +326,7 @@ function resetDB(){ if(confirm('Limpar todos os dados? Isso apaga produtos e his
    configurado em Configurações, os dados são carregados e salvos no banco. */
 const CLOUD_KEY='precificador_cloud';
 const CLOUD_TOKEN_KEY='precificador_token';
+const CLOUD_MIGR_KEY='precificador_migrado_v1'; // marca que o cache local já subiu para o banco
 let cloudState={connected:false, timer:null};
 let cloudMemToken=''; // fallback em memória (caso o navegador bloqueie o armazenamento)
 function cloudCfg(){ try{ return JSON.parse(localStorage.getItem(CLOUD_KEY))||{}; }catch(e){ return {}; } }
@@ -362,6 +363,30 @@ async function cloudPull(){
   if(j && j.data){ DB=j.data; ensureDBDefaults(); localStorage.setItem(DB_KEY, JSON.stringify(DB)); if(SESSION) render(); }
   else { await cloudPush(true); } // servidor vazio → sobe o estado local
 }
+// "Peso" do estado: usado para decidir a direção da sincronização na 1ª vez.
+function dbScore(db){ if(!db) return 0; const n=a=>Array.isArray(a)?a.length:0;
+  return n(db.produtos)+n(db.engenharias)+n(db.materiais)+n(db.tabelasPreco)+n(db.markups)+n(db.fretes)+n(db.usuarios); }
+function jaMigrou(){ try{ return localStorage.getItem(CLOUD_MIGR_KEY)==='1'; }catch(e){ return false; } }
+function marcarMigrado(){ try{ localStorage.setItem(CLOUD_MIGR_KEY,'1'); }catch(e){} }
+// Sincronização automática ao conectar: sobe o cache local quando o banco está vazio
+// (ou quando este navegador tem mais dados e ainda não migrou); senão, usa o banco.
+async function cloudSyncOnLogin(){
+  let server=null;
+  try{ const res=await cloudApi('/api/state?chave=default'); if(res.ok){ const j=await res.json(); server=(j&&j.data)?j.data:null; } }catch(e){}
+  const ls=dbScore(DB), ss=dbScore(server);
+  if(!server){ await cloudPush(true); }              // banco vazio → migra local
+  else if(!jaMigrou() && ls>ss){ await cloudPush(true); } // 1ª vez e local mais rico → migra local
+  else { DB=server; ensureDBDefaults(); try{ localStorage.setItem(DB_KEY, JSON.stringify(DB)); }catch(e){} } // usa o banco
+  marcarMigrado();
+  if(SESSION) render();
+}
+// Botão de reforço: força o envio dos dados deste navegador para o banco.
+async function cloudForcarMigracao(){
+  if(!cloudGetToken() || !cloudState.connected){ alert('Entre no sistema com seu usuário para conectar ao banco.'); return; }
+  if(!confirm('Enviar os dados deste navegador para o banco?\nIsso substitui o que estiver no banco pelos dados atuais desta tela.')) return;
+  try{ await cloudPush(true); marcarMigrado(); setCloudStatus('salvo','var(--green)'); alert('Dados enviados para o banco com sucesso.'); }
+  catch(e){ alert('Falha ao enviar: '+(e&&e.message||e)); }
+}
 function cloudMarkDirty(){ if(!cloudState.connected) return; clearTimeout(cloudState.timer); cloudState.timer=setTimeout(()=>cloudPush(false), 1500); }
 async function cloudPush(immediate){
   if(!cloudState.connected && !immediate) return;
@@ -373,29 +398,13 @@ async function cloudPush(immediate){
     setCloudStatus('salvo','var(--green)');
   }catch(e){ setCloudStatus('erro ao salvar','var(--red)'); }
 }
-// Conectar informando a senha (a senha é usada só agora e não é salva)
-async function cloudConectar(){
-  const url=el('clUrl').value.trim(); const email=el('clEmail').value.trim(); const senha=el('clSenha').value;
-  cloudSetCfg({ url, email }); // guarda só url + e-mail
-  if(!email){ alert('Informe o e-mail.'); return; }
-  if(!senha){ alert('Digite a senha para conectar (ela não fica salva).'); return; }
-  try{
-    setCloudStatus('conectando…','var(--amber)');
-    await cloudLoginSenha(email, senha);
-    await cloudPull();
-    cloudState.connected=true; setCloudStatus('conectado','var(--green)');
-    if(el('clSenha')) el('clSenha').value=''; // limpa a senha da tela
-    alert('Conectado. A senha não é armazenada — será pedida de novo na próxima sessão.');
-    render();
-  }catch(e){ cloudState.connected=false; setCloudStatus('offline','var(--red)'); alert('Falha ao conectar: '+e.message); }
-}
 // No início: conecta sozinho (sem precisar clicar).
 async function cloudAutoStart(){
   cloudSetCfg(cloudCfg());
   // Reaproveita o token da sessão atual (se o usuário já logou nesta aba). O login é quem conecta.
   if(cloudGetToken()){
-    try{ await cloudPull(); cloudState.connected=true; setCloudStatus('conectado','var(--green)'); return; }
-    catch(e){ cloudSetToken(''); }
+    try{ cloudState.connected=true; await cloudSyncOnLogin(); setCloudStatus('conectado','var(--green)'); return; }
+    catch(e){ cloudSetToken(''); cloudState.connected=false; }
   }
   setCloudStatus('offline');
 }
@@ -1904,18 +1913,15 @@ function viewConfig(){
       <button class="btn sm danger" onclick="resetDB()">🗑 Limpar todos os dados</button>
     </div></div>
   </div>
-  ${isAdmin?`<div class="card" style="margin-top:18px"><div class="hd"><div><h3>☁ Nuvem / Banco de Dados (PostgreSQL)</h3>
-    <div class="desc">Conecte ao servidor para persistir os dados no banco e sincronizar entre dispositivos</div></div>
+  ${isAdmin?`<div class="card" style="margin-top:18px"><div class="hd"><div><h3>☁ Banco de Dados</h3>
+    <div class="desc">A conexão é <b>automática</b>: ao entrar com seu usuário, os dados já são salvos e sincronizados no banco. Não é preciso configurar nada.</div></div>
     <span class="chip" id="cloudChip2" style="color:${cloudState.connected?'var(--green)':'var(--muted)'}">☁ ${cloudState.connected?'conectado':'offline'}</span></div>
-    <div class="bd"><div class="grid g-3">
-      <div class="field" style="grid-column:span 3"><label>URL da API (deixe a do próprio site)</label><input class="inp" id="clUrl" value="${(cloudCfg().url||((location.protocol==='http:'||location.protocol==='https:')?location.origin:'')).replace(/"/g,'&quot;')}" placeholder="https://seu-projeto.pages.dev"></div>
-      <div class="field"><label>E-mail</label><input class="inp" id="clEmail" value="${(cloudCfg().email||'').replace(/"/g,'&quot;')}" placeholder="admin@artecubica.com.br"></div>
-      <div class="field"><label>Senha <span class="muted">(não é salva)</span></label><input class="inp" type="password" id="clSenha" value="" autocomplete="new-password" name="clSenha_${Date.now()}" readonly onfocus="this.removeAttribute('readonly')" placeholder="clique e digite para conectar"></div>
-      <div class="field"><label>&nbsp;</label><div class="row"><button class="btn primary sm" onclick="cloudConectar()">🔌 Conectar</button>
-        <button class="btn sm" onclick="cloudPush(true)">⬆ Enviar agora</button>
-        <button class="btn sm danger" onclick="cloudDisconnect()">Desconectar</button></div></div>
-    </div>
-    <div class="hint">🔒 A <b>senha não fica salva</b> no navegador — cada usuário digita ao conectar, e a sessão expira ao fechar o navegador. Só a URL e o e-mail são lembrados. Enquanto não conectado, o app funciona offline (localStorage).</div>
+    <div class="bd">
+      <div class="row" style="gap:8px;flex-wrap:wrap">
+        <button class="btn sm" onclick="cloudPush(true)">⬆ Enviar agora para o banco</button>
+        <button class="btn primary sm" onclick="cloudForcarMigracao()">⤴ Subir dados deste navegador</button>
+      </div>
+      <div class="hint">Sincroniza sozinho enquanto você trabalha. Se este computador tinha dados salvos <b>somente localmente</b>, clique em <b>“Subir dados deste navegador”</b> uma vez para enviá-los ao banco.</div>
     </div></div>`:''}
 
   <div class="card" style="margin-top:18px"><div class="hd"><div><h3>Usuários</h3>
@@ -2089,7 +2095,7 @@ async function doLogin(){
       cloudSetToken(j.accessToken);
       SESSION={role:(j.usuario.perfil||'vendedor'), nome:j.usuario.nome, userId:j.usuario.id, email:j.usuario.email, admin:!!j.usuario.admin};
       cloudState.connected=true; setCloudStatus('conectado','var(--green)');
-      try{ await cloudPull(); }catch(e){}
+      try{ await cloudSyncOnLogin(); }catch(e){}
       entrarApp(); return;
     }catch(e){ /* servidor indisponível → tenta modo offline abaixo */ }
   }
