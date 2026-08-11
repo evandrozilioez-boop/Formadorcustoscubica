@@ -226,7 +226,9 @@ html.print-eng body{page:engpage}
       <div class="sep">Análise</div>
       <button data-view="tabelapreco"><span class="ico">🏷️</span> Tabela de Preço</button>
       <button data-view="relatorios"><span class="ico">▦</span> Relatórios</button>
+      <div class="sep">Sistema</div>
       <button data-view="config"><span class="ico">⚙</span> Configurações</button>
+      <button data-view="backup"><span class="ico">💾</span> Backup</button>
     </nav>
     <div style="margin-top:24px;padding:12px;border-radius:11px;background:var(--surface-2);font-size:12px" id="userBox"></div>
   </aside>
@@ -329,7 +331,7 @@ function resetDB(){ if(confirm('Limpar todos os dados? Isso apaga produtos e his
 const CLOUD_KEY='precificador_cloud';
 const CLOUD_TOKEN_KEY='precificador_token';
 const CLOUD_MIGR_KEY='precificador_migrado_v1'; // marca que o cache local já subiu para o banco
-let cloudState={connected:false, timer:null};
+let cloudState={connected:false, timer:null, dirty:false, pushing:false, since:0};
 let cloudMemToken=''; // fallback em memória (caso o navegador bloqueie o armazenamento)
 function cloudCfg(){ try{ return JSON.parse(localStorage.getItem(CLOUD_KEY))||{}; }catch(e){ return {}; } }
 // Persiste APENAS url e e-mail. A SENHA NUNCA é gravada no navegador.
@@ -389,17 +391,50 @@ async function cloudForcarMigracao(){
   try{ await cloudPush(true); marcarMigrado(); setCloudStatus('salvo','var(--green)'); alert('Dados enviados para o banco com sucesso.'); }
   catch(e){ alert('Falha ao enviar: '+(e&&e.message||e)); }
 }
-function cloudMarkDirty(){ if(!cloudState.connected) return; clearTimeout(cloudState.timer); cloudState.timer=setTimeout(()=>cloudPush(false), 1500); }
+// Salvamento em tempo (quase) real: agenda um push curtíssimo após cada alteração,
+// mas garante um envio a cada ~2s no máximo mesmo com digitação contínua.
+function cloudMarkDirty(){
+  if(!cloudState.connected){ cloudState.dirty=true; return; }
+  cloudState.dirty=true;
+  if(!cloudState.since) cloudState.since=Date.now();
+  clearTimeout(cloudState.timer);
+  const espera = (Date.now()-cloudState.since>2000) ? 0 : 350; // no máx ~2s após a 1ª mudança
+  cloudState.timer=setTimeout(()=>cloudPush(false), espera);
+}
 async function cloudPush(immediate){
   if(!cloudState.connected && !immediate) return;
   if(!cloudGetToken()) return;
+  if(cloudState.pushing){ cloudState.dirty=true; return; } // já há um envio em andamento
+  cloudState.pushing=true; cloudState.dirty=false; cloudState.since=0;
+  const body=JSON.stringify({chave:'default',data:DB});
   try{
     setCloudStatus('salvando…','var(--amber)');
-    const res=await cloudApi('/api/state',{method:'PUT',body:JSON.stringify({chave:'default',data:DB})});
-    if(!res.ok) throw new Error();
+    const res=await cloudApi('/api/state',{method:'PUT',body});
+    if(!res.ok) throw new Error('HTTP '+res.status);
     setCloudStatus('salvo','var(--green)');
-  }catch(e){ setCloudStatus('erro ao salvar','var(--red)'); }
+  }catch(e){
+    // Não perde a alteração: remarca como pendente e tenta de novo em 1,5s.
+    cloudState.dirty=true; setCloudStatus('salvando…','var(--amber)');
+    clearTimeout(cloudState.timer); cloudState.timer=setTimeout(()=>cloudPush(false), 1500);
+  }finally{
+    cloudState.pushing=false;
+    if(cloudState.dirty && cloudState.connected){ clearTimeout(cloudState.timer); cloudState.timer=setTimeout(()=>cloudPush(false), 300); }
+  }
 }
+// Ao fechar/ocultar a aba: envia o que ainda estiver pendente (keepalive permite concluir após sair).
+function cloudFlushSync(){
+  try{
+    if(!cloudState.connected || !cloudGetToken()) return;
+    if(!cloudState.dirty && !cloudState.pushing) return;
+    fetch(cloudUrl()+'/api/state',{method:'PUT',keepalive:true,
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+cloudGetToken()},
+      body:JSON.stringify({chave:'default',data:DB})});
+    cloudState.dirty=false;
+  }catch(e){}
+}
+window.addEventListener('pagehide', cloudFlushSync);
+window.addEventListener('beforeunload', cloudFlushSync);
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden') cloudFlushSync(); });
 // No início: conecta sozinho (sem precisar clicar).
 async function cloudAutoStart(){
   cloudSetCfg(cloudCfg());
@@ -512,7 +547,8 @@ const VIEW_META = {
   frete:['Frete','Cadastro de fretes (CIF/FOB) e percentuais'],
   engenharia:['Engenharia','Ficha técnica por blocos · impressão por folha'],
   relatorios:['Relatórios','Análises e exportação (Excel · PDF · CSV)'],
-  config:['Configurações','Usuários, empresa, metas e histórico']
+  config:['Configurações','Usuários, empresa, metas e histórico'],
+  backup:['Backup','Baixe ou restaure todos os dados do sistema']
 };
 let currentView='dashboard';
 const el = id => document.getElementById(id);
@@ -533,7 +569,7 @@ function render(){
   const c = el('content');
   if(!SESSION){return;}
   c.innerHTML = ({dashboard:viewDashboard, calc:viewCalc, simulador:viewSimulador,
-    produtos:viewProdutos, materiaprima:viewMateriaPrima, engenharia:viewEngenharia, impostos:viewImpostos, frete:viewFrete, tabelapreco:viewTabelaPreco, relatorios:viewRelatorios, config:viewConfig}[currentView])();
+    produtos:viewProdutos, materiaprima:viewMateriaPrima, engenharia:viewEngenharia, impostos:viewImpostos, frete:viewFrete, tabelapreco:viewTabelaPreco, relatorios:viewRelatorios, config:viewConfig, backup:viewBackup}[currentView])();
   if(currentView==='calc') initCalc();
   if(currentView==='simulador') initSim();
 }
@@ -1070,7 +1106,7 @@ const ENG_BLOCOS=[
   {key:'fibraSilic',label:'Almofadas',cols:[['pesoTotal','Peso Total'],['alm1','Almofada 1'],['alm2','Almofada 2'],['alm3','Almofada 3'],['alm4','Almofada 4'],['alm5','Almofada 5'],['alm6','Almofada 6'],['obs','Obs']]},
   {key:'percinta',label:'Percinta',cols:[['quant','Quant.'],['elast','Elasticidade'],['frenteLado','Frente/Lado']]},
   {key:'tecido',label:'Tecido',cols:[['qtdPloter','Qtd. (medida ploter)'],['cor','Cor'],['arquivo','Arquivo Plotter'],['obs','Obs']]},
-  {key:'tnt',label:'TNT',cols:[['qtdPloter','Qtd. (ploter) total'],['obs','Obs']]},
+  {key:'tnt',label:'TNT',cols:[['qtdPloter','Qtd. (ploter) total'],['larg','Largura'],['m2','M²'],['obs','Obs']]},
   {key:'acessorios',label:'Acessórios',cols:[['descricao','Descrição'],['quant','Quantidade'],['obs','Obs']],matFirst:true}
 ];
 // coluna de quantidade (por unidade) usada no custo e na consolidação de cada bloco
@@ -1084,7 +1120,8 @@ function rowQuant(key,r){
   if(key==='ziper') return ziperTotal(r); // Total: Cursor = só quantidade; demais = quant × comprimento
   if(key==='fibraManta'||key==='mantaExpandida') return num(r.comp)*num(r.larg)*num(r.quant); // M² = comp × larg × quant
   if(key==='fibraSilic') return fibraSilicSoma(r); // Peso Total = soma das almofadas
-  return num(r[QTD_KEY[key]]); // kitPes, embalagem, percinta = Quant. · tnt = Qtd.(ploter) · acessorios = Quantidade
+  if(key==='tnt') return num(r.qtdPloter)*num(r.larg); // M² = Qtd. (ploter) × Largura
+  return num(r[QTD_KEY[key]]); // kitPes, embalagem, percinta = Quant. · acessorios = Quantidade
 }
 const ENG_IDENT=[['tamanho','Tamanho'],['pedido','Pedido'],['lote','Lote'],['revpor','Revisão por'],['criacao','Criação'],['ultrev','Última revisão']];
 const ENG_BASE=ENG_BLOCOS.filter(b=>b.key!=='tecido'); // blocos da composição (sem tecido)
@@ -1192,6 +1229,7 @@ function engCellFor(eng,blk,r,i,c,editavel){
   if(c[0]==='m2' && key==='madeira') return `<td class="eng-tot" id="engm2_${key}_${i}" style="font-weight:700" title="Compr. × Larg. × Espessura × Quant.">${fmtQtd(num(r.compr)*num(r.larg)*num(r.esp)*num(r.quant1))}</td>`;
   if(c[0]==='m2' && key==='espumas') return `<td class="eng-tot" id="engm2_${key}_${i}" style="font-weight:700" title="Compr. × Larg. × Espessura × Quant.">${fmtQtd(num(r.compr)*num(r.larg)*num(r.esp)*num(r.quant))}</td>`;
   if(c[0]==='m2' && (key==='fibraManta'||key==='mantaExpandida')) return `<td class="eng-tot" id="engm2_${key}_${i}" style="font-weight:700" title="Compr. × Larg. × Quant.">${fmtQtd(num(r.comp)*num(r.larg)*num(r.quant))}</td>`;
+  if(c[0]==='m2' && key==='tnt') return `<td class="eng-tot" id="engm2_tnt_${i}" style="font-weight:700" title="Qtd. (ploter) × Largura">${fmtQtd(num(r.qtdPloter)*num(r.larg))}</td>`;
   if(c[0]==='pesoTotal' && key==='fibraSilic') return `<td class="eng-tot" id="engps_${key}_${i}" style="font-weight:700" title="Soma das almofadas">${fmtQtd(fibraSilicSoma(r))}</td>`;
   if(c[0]==='descricao' && (key==='kitPes'||key==='acessorios')) return `<td class="muted" title="Vem da descrição do insumo selecionado">${r.descricao?r.descricao.toString().replace(/</g,'&lt;'):'— selecione o insumo'}</td>`;
   return `<td><input class="inp" value="${(r[c[0]]==null?'':r[c[0]]).toString().replace(/"/g,'&quot;')}" oninput="onEngEdit('${key}',${i},'${c[0]}',this)" ${editavel?'':'disabled'}></td>`;
@@ -1346,6 +1384,9 @@ function onEngEdit(key,i,colKey,inputEl){ const eng=engCurrent(); if(!eng) retur
     const qp=el('engqp_espumas_'+i); if(qp) qp.textContent=fmtQtd(num(r.quant)*num(eng.pedido));
     engRecalc();
   } else if(key==='espumas' && colKey==='ref'){ engRezebra(eng); // muda a densidade → re-zebra sem recarregar a página
+  } else if(key==='tnt' && (colKey==='qtdPloter'||colKey==='larg')){
+    const mm=el('engm2_tnt_'+i); if(mm) mm.textContent=fmtQtd(num(r.qtdPloter)*num(r.larg));
+    engRecalc();
   } else if(colKey===QTD_KEY[key]){
     const qp=el('engqp_'+key+'_'+i); if(qp) qp.textContent=fmtQtd(rowQuant(key,r)*num(eng.pedido));
     engRecalc();
@@ -1914,6 +1955,59 @@ function downloadFile(name,content,type){
    CONFIGURAÇÕES
    ============================================================ */
 function perfilNome(key){ const pf=DB.perfis.find(p=>p.key===key); return pf?pf.nome:key; }
+/* ============================================================
+   BACKUP — exporta/restaura todos os dados do sistema
+   ============================================================ */
+function backupNomeArq(){ const d=new Date(); const p=n=>String(n).padStart(2,'0');
+  return `backup-precificador-${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.json`; }
+function backupGerar(){
+  try{
+    const payload={ _app:'precificador-artecubica', _versao:1, _geradoEm:new Date().toISOString(), empresa:DB.empresa||'', dados:DB };
+    const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+    const url=URL.createObjectURL(blob); const a=document.createElement('a');
+    a.href=url; a.download=backupNomeArq(); document.body.appendChild(a); a.click();
+    setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 600);
+  }catch(e){ alert('Não foi possível gerar o backup: '+(e&&e.message||e)); }
+}
+function backupImportarArquivo(input){
+  const f=input.files&&input.files[0]; if(!f) return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    let j; try{ j=JSON.parse(e.target.result); }catch(err){ alert('Arquivo inválido: não é um backup JSON.'); input.value=''; return; }
+    const dados = (j && j.dados) ? j.dados : j; // aceita o backup com envelope ou o DB puro
+    if(!dados || typeof dados!=='object' || !('produtos' in dados || 'engenharias' in dados || 'materiais' in dados)){
+      alert('Este arquivo não parece ser um backup do sistema.'); input.value=''; return;
+    }
+    const quando = (j && j._geradoEm) ? new Date(j._geradoEm).toLocaleString('pt-BR') : 'data desconhecida';
+    if(!confirm('Restaurar o backup de '+quando+'?\n\nTODOS os dados atuais serão substituídos pelos do arquivo. Esta ação não pode ser desfeita.')){ input.value=''; return; }
+    DB=dados; ensureDBDefaults(); save();
+    try{ if(cloudState.connected){ marcarMigrado(); cloudPush(true); } }catch(e){}
+    input.value='';
+    alert('Backup restaurado com sucesso.');
+    render();
+  };
+  reader.readAsText(f);
+}
+function viewBackup(){
+  const isAdmin = !!(SESSION && (SESSION.admin || (currentPerfil()||{}).admin));
+  const c=a=>Array.isArray(a)?a.length:0;
+  const resumo=[['Produtos',c(DB.produtos)],['Engenharias (fichas)',c(DB.engenharias)],['Matérias-primas',c(DB.materiais)],['Markups',c(DB.markups)],['Fretes',c(DB.fretes)],['Tabelas de preço',c(DB.tabelasPreco)],['Usuários',c(DB.usuarios)]];
+  return `<div class="card"><div class="hd"><div><h3>💾 Backup do sistema</h3>
+      <div class="desc">Baixe um arquivo com todos os dados ou restaure o sistema a partir de um backup</div></div>
+      <span class="chip" style="color:${cloudState.connected?'var(--green)':'var(--muted)'}">☁ ${cloudState.connected?'conectado ao banco':'offline'}</span></div>
+    <div class="bd">
+      <div class="grid g-4" style="margin-bottom:16px">
+        ${resumo.map(([l,n])=>`<div style="background:var(--surface-2);border-radius:10px;padding:10px 12px"><div class="muted" style="font-size:11px">${l}</div><div style="font-size:20px;font-weight:800">${n}</div></div>`).join('')}
+      </div>
+      <div class="row" style="gap:10px;flex-wrap:wrap">
+        <button class="btn primary" onclick="backupGerar()">⬇ Baixar backup (.json)</button>
+        ${isAdmin?`<input type="file" id="backupFile" accept="application/json,.json" style="display:none" onchange="backupImportarArquivo(this)">
+        <button class="btn danger" onclick="el('backupFile').click()">⬆ Restaurar backup…</button>`:''}
+      </div>
+      <div class="hint" style="margin-top:12px">O backup inclui <b>produtos, engenharia, matérias-primas, markups, fretes, tabelas de preço, usuários e configurações</b>. Guarde o arquivo em local seguro (nuvem/pen drive). ${isAdmin?'A restauração <b>substitui todos os dados atuais</b> e, se conectado, também atualiza o banco.':'Apenas administradores podem restaurar.'}</div>
+    </div></div>`;
+}
+
 let srvUsuarios=null;
 function usuariosLista(){ return (cloudUrl() && Array.isArray(srvUsuarios)) ? srvUsuarios : DB.usuarios; }
 async function carregarUsuarios(){ if(!cloudUrl()) return; try{ const res=await cloudApi('/api/users'); if(res.ok){ const j=await res.json(); srvUsuarios=j.usuarios||[]; render(); } }catch(e){} }
@@ -2089,7 +2183,7 @@ function currentPerfil(){ return DB.perfis.find(pf=>pf.key===SESSION.role); }
 function can(p){ if(SESSION&&SESSION.admin) return true; const pf=currentPerfil(); if(!pf) return false; if(pf.admin) return true; if(p==='impostos') return false; if(p==='relatorios') return true; return !!pf.editar; }
 
 /* ---------- Controle de menus por perfil ---------- */
-const MENU_LIST=[['dashboard','Dashboard'],['calc','Precificação'],['simulador','Simulador'],['produtos','Produtos'],['materiaprima','Matéria-Prima'],['engenharia','Engenharia'],['impostos','Markup'],['frete','Frete'],['tabelapreco','Tabela de Preço'],['relatorios','Relatórios'],['config','Configurações']];
+const MENU_LIST=[['dashboard','Dashboard'],['calc','Precificação'],['simulador','Simulador'],['produtos','Produtos'],['materiaprima','Matéria-Prima'],['engenharia','Engenharia'],['impostos','Markup'],['frete','Frete'],['tabelapreco','Tabela de Preço'],['relatorios','Relatórios'],['config','Configurações'],['backup','Backup']];
 function defaultMenuPerms(){return {
   gestor:{dashboard:true,calc:true,simulador:true,produtos:true,materiaprima:true,engenharia:true,impostos:false,frete:true,tabelapreco:true,relatorios:true,config:false},
   vendedor:{dashboard:true,calc:true,simulador:true,produtos:true,materiaprima:false,engenharia:false,impostos:false,frete:false,tabelapreco:true,relatorios:true,config:false}
