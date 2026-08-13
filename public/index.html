@@ -225,6 +225,7 @@ html.print-eng body{page:engpage}
       <button data-view="frete"><span class="ico">🚚</span> Frete</button>
       <div class="sep">Análise</div>
       <button data-view="tabelapreco"><span class="ico">🏷️</span> Tabela de Preço</button>
+      <button data-view="comercial"><span class="ico">🤝</span> Tabela Comercial</button>
       <button data-view="relatorios"><span class="ico">▦</span> Relatórios</button>
       <div class="sep">Sistema</div>
       <button data-view="config"><span class="ico">⚙</span> Configurações</button>
@@ -297,6 +298,9 @@ function ensureDBDefaults(){
     DB.markupAtivo=DB.markups[0].id;
   }
   if(!DB.markupAtivo || !DB.markups.some(m=>m.id===DB.markupAtivo)) DB.markupAtivo=DB.markups[0].id;
+  // Tabela Comercial: preços importados (congelados) + descontos pré-cadastrados
+  DB.descontos=DB.descontos||[{id:uid(),nome:'À vista',percentual:5},{id:uid(),nome:'Atacado',percentual:10}];
+  DB.tabelaComercial=DB.tabelaComercial||{markupId:null,freteId:null,importadoEm:null,descontoId:null,precos:{}};
 }
 /* ---------- Markups (composições de impostos/despesas/comissão/margem) ---------- */
 function markupAtivoObj(){ return DB.markups.find(m=>m.id===DB.markupAtivo)||DB.markups[0]; }
@@ -337,8 +341,8 @@ function hasPending(){ try{ return localStorage.getItem(CLOUD_PENDING_KEY)==='1'
 let cloudState={connected:false, timer:null, dirty:false, pushing:false, since:0, updatedAt:null, pollTimer:null, applying:false, lastPushAt:0};
 /* ---- Merge por registro (vários usuários ao mesmo tempo sem perder dados) ---- */
 // Coleções (listas) sincronizadas por chave de registro, e campos "avulsos" (último a salvar vence).
-const MERGE_KEYS={ produtos:'id', engenharias:'id', materiais:'id', markups:'id', fretes:'id', usuarios:'id', perfis:'key', tabelasPreco:'id', historico:'id' };
-const MERGE_SCALARS=['empresa','taxes','desp','comissao','margemAlvo','margemMin','margem','markupAtivo','menuPerms','tpCfg'];
+const MERGE_KEYS={ produtos:'id', engenharias:'id', materiais:'id', markups:'id', fretes:'id', descontos:'id', usuarios:'id', perfis:'key', tabelasPreco:'id', historico:'id' };
+const MERGE_SCALARS=['empresa','taxes','desp','comissao','margemAlvo','margemMin','margem','markupAtivo','menuPerms','tpCfg','tabelaComercial'];
 let cloudBase=null; // cópia do último estado em sincronia com o banco (referência para calcular o que mudou)
 function snap(o){ try{ return JSON.parse(JSON.stringify(o)); }catch(e){ return {}; } }
 function setBase(){ cloudBase=snap(DB); }
@@ -662,6 +666,7 @@ const VIEW_META = {
   materiaprima:['Matéria-Prima','Cadastro de insumos · importação via Excel/CSV'],
   impostos:['Markup','Cadastre markups (impostos, comissão, despesas e margem) para análises diferentes'],
   tabelapreco:['Tabela de Preço','Preços por produto (tamanho × tecido) · markup e frete'],
+  comercial:['Tabela Comercial','Preços importados (congelados) · trabalhe com descontos'],
   frete:['Frete','Cadastro de fretes (CIF/FOB) e percentuais'],
   engenharia:['Engenharia','Ficha técnica por blocos · impressão por folha'],
   relatorios:['Relatórios','Análises e exportação (Excel · PDF · CSV)'],
@@ -687,7 +692,7 @@ function render(){
   const c = el('content');
   if(!SESSION){return;}
   c.innerHTML = ({dashboard:viewDashboard, calc:viewCalc, simulador:viewSimulador,
-    produtos:viewProdutos, materiaprima:viewMateriaPrima, engenharia:viewEngenharia, impostos:viewImpostos, frete:viewFrete, tabelapreco:viewTabelaPreco, relatorios:viewRelatorios, config:viewConfig, backup:viewBackup}[currentView])();
+    produtos:viewProdutos, materiaprima:viewMateriaPrima, engenharia:viewEngenharia, impostos:viewImpostos, frete:viewFrete, tabelapreco:viewTabelaPreco, comercial:viewComercial, relatorios:viewRelatorios, config:viewConfig, backup:viewBackup}[currentView])();
   if(currentView==='calc') initCalc();
   if(currentView==='simulador') initSim();
 }
@@ -1945,7 +1950,7 @@ function viewFrete(){
     </div>
     <div class="row" style="margin-top:6px"><button class="btn primary sm" onclick="salvarFrete()">💾 Salvar</button>
       <button class="btn sm" onclick="freteEdit=null;render()">Limpar</button>
-      <span class="hint">O percentual é somado ao preço na Tabela de Preço. FOB normalmente é 0%.</span></div>
+      <span class="hint">O percentual é aplicado SOBRE o preço final na Tabela de Preço (ex.: 1000 + 10% = 1100). FOB normalmente é 0%.</span></div>
     </div></div>`:''}
   <div class="card"><div class="hd"><div><h3>Fretes cadastrados</h3><div class="desc">${(DB.fretes||[]).length} frete(s)</div></div></div>
     <div class="bd" style="padding:0"><table><thead><tr><th>Nome</th><th>Tipo</th><th>Percentual</th>${editavel?'<th></th>':''}</tr></thead>
@@ -1966,11 +1971,66 @@ function excluirFrete(id){ const f=freteById(id); if(!f) return; if(!confirm('Ex
 let tpCfg=null;
 const TP_CORES=['rgba(22,163,74,.14)','rgba(217,119,6,.14)','rgba(59,91,219,.14)','rgba(202,138,4,.16)','rgba(14,165,233,.14)','rgba(0,0,0,.06)'];
 function tpCor(i){ return TP_CORES[i%TP_CORES.length]; }
-function precoTabela(custo, mk, freteCifPct){
-  const desp={...mk.desp}; if(num(freteCifPct)>0) desp.freteCif=num(freteCifPct);
-  return precificar({custo, taxes:mk.taxes, desp, comissao:mk.comissao, margem:mk.margemAlvo});
+function precoTabela(custo, mk, fretePctVal){
+  // Preço da tabela = preço com o markup e, POR CIMA, o percentual de frete.
+  // Ex.: preço 1000 + frete 10% = 1100.
+  const r=precificar({custo, taxes:mk.taxes, desp:mk.desp, comissao:mk.comissao, margem:mk.margemAlvo});
+  const f=num(fretePctVal);
+  if(f>0 && isFinite(r.preco)){ r.precoSemFrete=r.preco; r.frete=r.preco*(f/100); r.preco=r.preco*(1+f/100); }
+  return r;
 }
 function tpSet(k,v){ if(!tpCfg) return; tpCfg[k]=v; render(); }
+/* ---- Exportação para Excel (somente valores, sem fórmulas) ---- */
+function round2(n){ return Math.round(num(n)*100)/100; }
+function baixarXlsx(aoa, nomeArq, nomePlan){
+  loadSheetJS(err=>{
+    if(err||!window.XLSX){ alert('Não foi possível carregar o gerador de Excel (verifique a conexão).'); return; }
+    const ws=XLSX.utils.aoa_to_sheet(aoa); // aoa = valores puros → sem fórmulas
+    const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, (nomePlan||'Tabela').slice(0,31));
+    XLSX.writeFile(wb, nomeArq);
+  });
+}
+function tabelaPrecoAOA(){
+  const mk=DB.markups.find(m=>m.id===tpCfg.markupId)||markupAtivoObj();
+  const frete=fretePct(tpCfg.freteId);
+  const fr=freteById(tpCfg.freteId); const freteLbl=fr?`${fr.nome} (${fr.tipo} ${pct(num(fr.percentual))})`:'—';
+  const aoa=[[`Tabela de Preço — ${DB.empresa}`],[`Markup: ${mk.nome} · Frete: ${freteLbl} · ${new Date().toLocaleDateString('pt-BR')}`],[]];
+  DB.produtos.forEach(p=>{
+    const tamanhos=[...new Set(p.variacoes.map(v=>v.tamanho))];
+    const tecidos=[...new Set(p.variacoes.map(v=>v.tecido).filter(t=>t&&t!=='—'))];
+    aoa.push([`${p.modelo} (${p.codigo})`]);
+    if(tecidos.length){
+      aoa.push(['Tamanho', ...tecidos.map(t=>'Tecido '+t)]);
+      tamanhos.forEach(tz=>{ aoa.push([tz, ...tecidos.map(tc=>{ const v=p.variacoes.find(x=>x.tamanho===tz&&x.tecido===tc); return v?round2(precoTabela(num(v.custoTotal),mk,frete).preco):''; })]); });
+    } else {
+      aoa.push(['Tamanho','Dimensões','Preço']);
+      p.variacoes.forEach(v=>{ aoa.push([v.tamanho, v.medida||'', round2(precoTabela(num(v.custoTotal),mk,frete).preco)]); });
+    }
+    aoa.push([]);
+  });
+  return aoa;
+}
+function exportTabelaPrecoXlsx(){ if(!DB.produtos.length){ alert('Cadastre produtos para exportar.'); return; } baixarXlsx(tabelaPrecoAOA(), `tabela-preco-${new Date().toISOString().slice(0,10)}.xlsx`, 'Tabela de Preço'); }
+function tabelaComercialAOA(){
+  const tc=DB.tabelaComercial; const desc=descontoAtual();
+  const aoa=[[`Tabela Comercial — ${DB.empresa}`],[`${desc?`Desconto: ${desc.nome} (${pct(num(desc.percentual))})`:'Sem desconto'} · ${new Date().toLocaleDateString('pt-BR')}`],[]];
+  DB.produtos.forEach(p=>{
+    const tamanhos=[...new Set(p.variacoes.map(v=>v.tamanho))];
+    const tecidos=[...new Set(p.variacoes.map(v=>v.tecido).filter(t=>t&&t!=='—'))];
+    const pmap=(tc.precos&&tc.precos[p.id])||{};
+    aoa.push([`${p.modelo} (${p.codigo})`]);
+    if(tecidos.length){
+      aoa.push(['Tamanho', ...tecidos.map(t=>'Tecido '+t)]);
+      tamanhos.forEach(tz=>{ aoa.push([tz, ...tecidos.map(tcd=>{ const b=pmap[comChave(tz,tcd)]; return b==null?'':round2(comLiquido(b)); })]); });
+    } else {
+      aoa.push(['Tamanho','Dimensões','Preço']);
+      p.variacoes.forEach(v=>{ const b=pmap[comChave(v.tamanho,v.tecido)]; aoa.push([v.tamanho, v.medida||'', b==null?'':round2(comLiquido(b))]); });
+    }
+    aoa.push([]);
+  });
+  return aoa;
+}
+function exportComercialXlsx(){ if(!DB.tabelaComercial.importadoEm){ alert('Importe os preços antes de exportar.'); return; } baixarXlsx(tabelaComercialAOA(), `tabela-comercial-${new Date().toISOString().slice(0,10)}.xlsx`, 'Tabela Comercial'); }
 function viewTabelaPreco(){
   if(!tpCfg) tpCfg={markupId:DB.markupAtivo, freteId:(DB.fretes[0]&&DB.fretes[0].id)};
   if(!DB.markups.some(m=>m.id===tpCfg.markupId)) tpCfg.markupId=DB.markupAtivo;
@@ -1983,6 +2043,7 @@ function viewTabelaPreco(){
     <div class="row" style="gap:14px;flex-wrap:wrap;align-items:flex-end">
       <div class="field" style="margin:0;min-width:200px"><label>Markup</label><select class="inp" onchange="tpSet('markupId',this.value)">${DB.markups.map(m=>`<option value="${m.id}" ${m.id===tpCfg.markupId?'selected':''}>${m.nome}</option>`).join('')}</select></div>
       <div class="field" style="margin:0;min-width:240px"><label>Frete</label><select class="inp" onchange="tpSet('freteId',this.value)">${DB.fretes.map(f=>`<option value="${f.id}" ${f.id===tpCfg.freteId?'selected':''}>${f.nome} · ${f.tipo} ${pct(num(f.percentual))}</option>`).join('')}</select></div>
+      <button class="btn sm" onclick="exportTabelaPrecoXlsx()">⬇ Excel</button>
       <button class="btn sm" onclick="window.print()">🖨 Imprimir</button>
       <span class="hint">Altere o markup ou o frete e a tabela atualiza na hora.</span>
     </div>
@@ -2005,6 +2066,94 @@ function viewTabelaPreco(){
     } else {
       h+=`<table><thead><tr><th>Medida</th><th>Dimensões</th><th style="text-align:right">Preço de venda</th></tr></thead><tbody>`;
       p.variacoes.forEach(v=>{ const r=precoTabela(num(v.custoTotal),mk,frete); h+=`<tr><td><b>${v.tamanho}</b></td><td class="muted">${v.medida||'—'}</td><td style="text-align:right;font-weight:700">${money(r.preco)}</td></tr>`; });
+      h+=`</tbody></table>`;
+    }
+    h+=`</div></div>`;
+  });
+  return h;
+}
+
+/* ---------- Tabela Comercial (preços importados/congelados + descontos) ---------- */
+let descontoEdit=null, comGerenciar=false;
+function comChave(tz,tc){ return tz+''+(tc||'—'); }
+function comImportar(){
+  const tc=DB.tabelaComercial;
+  const mk=DB.markups.find(m=>m.id===tc.markupId)||markupAtivoObj();
+  const frete=fretePct(tc.freteId);
+  const precos={};
+  DB.produtos.forEach(p=>{ precos[p.id]={}; p.variacoes.forEach(v=>{ const r=precoTabela(num(v.custoTotal),mk,frete); precos[p.id][comChave(v.tamanho,v.tecido)]=Math.round(r.preco*100)/100; }); });
+  tc.precos=precos; tc.importadoEm=new Date().toISOString(); tc.markupNome=mk.nome;
+  save(); render();
+  alert('Preços importados e congelados na Tabela Comercial.');
+}
+function comSet(k,v){ DB.tabelaComercial[k]=v; save(); render(); }
+function descontoAtual(){ return (DB.descontos||[]).find(d=>d.id===DB.tabelaComercial.descontoId); }
+function comLiquido(bruto){ const d=descontoAtual(); const p=d?num(d.percentual):0; return bruto*(1-p/100); }
+function descontoSalvar(){ const nome=el('dscNome').value.trim(); if(!nome){ alert('Informe o nome do desconto.'); return; }
+  const reg={nome,percentual:num(el('dscPct').value)};
+  if(descontoEdit){ const d=(DB.descontos||[]).find(x=>x.id===descontoEdit); if(d) Object.assign(d,reg); descontoEdit=null; }
+  else { (DB.descontos||(DB.descontos=[])).push({id:uid(),...reg}); }
+  save(); render(); }
+function descontoEditar(id){ const d=(DB.descontos||[]).find(x=>x.id===id); if(!d) return; descontoEdit=id; el('dscNome').value=d.nome; el('dscPct').value=num(d.percentual); window.scrollTo({top:0,behavior:'smooth'}); }
+function descontoExcluir(id){ const d=(DB.descontos||[]).find(x=>x.id===id); if(!d) return; if(!confirm('Excluir o desconto "'+d.nome+'"?')) return; DB.descontos=DB.descontos.filter(x=>x.id!==id); if(DB.tabelaComercial.descontoId===id) DB.tabelaComercial.descontoId=null; save(); render(); }
+function comCelula(bruto,bg){
+  const style=bg?bg:'';
+  if(bruto==null) return `<td class="muted" style="text-align:center;${style}">—</td>`;
+  const d=descontoAtual();
+  if(d){ return `<td style="text-align:center;${style}"><div style="text-decoration:line-through;font-size:11px;color:var(--muted)">${money(bruto)}</div><b>${money(comLiquido(bruto))}</b></td>`; }
+  return `<td style="text-align:center;font-weight:700;${style}">${money(bruto)}</td>`;
+}
+function viewComercial(){
+  const editavel=can('editar');
+  const tc=DB.tabelaComercial;
+  if(!DB.markups.some(m=>m.id===tc.markupId)) tc.markupId=DB.markupAtivo;
+  if(tc.freteId && !freteById(tc.freteId)) tc.freteId=null;
+  if(tc.descontoId && !(DB.descontos||[]).some(d=>d.id===tc.descontoId)) tc.descontoId=null;
+  const desc=descontoAtual();
+  const importado=!!tc.importadoEm;
+  let h=`<div class="card no-print" style="margin-bottom:16px"><div class="bd">
+    <div class="row" style="gap:14px;flex-wrap:wrap;align-items:flex-end">
+      <div class="field" style="margin:0;min-width:190px"><label>Markup a importar</label><select class="inp" onchange="comSet('markupId',this.value)">${DB.markups.map(m=>`<option value="${m.id}" ${m.id===tc.markupId?'selected':''}>${m.nome}</option>`).join('')}</select></div>
+      <div class="field" style="margin:0;min-width:210px"><label>Frete (opcional)</label><select class="inp" onchange="comSet('freteId',this.value)"><option value="">— sem frete —</option>${DB.fretes.map(f=>`<option value="${f.id}" ${f.id===tc.freteId?'selected':''}>${f.nome} · ${f.tipo} ${pct(num(f.percentual))}</option>`).join('')}</select></div>
+      ${editavel?`<button class="btn primary sm" onclick="comImportar()">⬇ ${importado?'Reimportar':'Importar'} preços</button>`:''}
+      <div class="field" style="margin:0;min-width:190px"><label>Desconto aplicado</label><select class="inp" onchange="comSet('descontoId',this.value)"><option value="">— sem desconto —</option>${(DB.descontos||[]).map(d=>`<option value="${d.id}" ${d.id===tc.descontoId?'selected':''}>${d.nome} (${pct(num(d.percentual))})</option>`).join('')}</select></div>
+      ${editavel?`<button class="btn sm" onclick="comGerenciar=!comGerenciar;render()">⚙ ${comGerenciar?'Ocultar descontos':'Gerenciar descontos'}</button>`:''}
+      <button class="btn sm" onclick="exportComercialXlsx()">⬇ Excel</button>
+      <button class="btn sm" onclick="window.print()">🖨 Imprimir</button>
+    </div>
+    <div class="hint">${importado?`Importado em ${new Date(tc.importadoEm).toLocaleString('pt-BR')}${tc.markupNome?` · markup "${tc.markupNome}"`:''}. Os valores ficam <b>congelados</b> até você reimportar.`:'Escolha o markup e clique em Importar preços para congelar a tabela.'}</div>
+  </div></div>`;
+  if(editavel && comGerenciar){
+    h+=`<div class="card no-print" style="margin-bottom:16px"><div class="hd"><div><h3>Descontos pré-cadastrados</h3><div class="desc">${(DB.descontos||[]).length} desconto(s)</div></div></div><div class="bd">
+      <div class="row" style="gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <div class="field" style="margin:0;min-width:200px"><label>Nome</label><input class="inp" id="dscNome" placeholder="ex.: À vista, Atacado"></div>
+        <div class="field" style="margin:0;width:120px"><label>Percentual</label><div class="inp-group"><input class="inp" id="dscPct" placeholder="0,00"><span class="suffix">%</span></div></div>
+        <button class="btn primary sm" onclick="descontoSalvar()">💾 Salvar</button>
+        <button class="btn sm" onclick="descontoEdit=null;render()">Limpar</button>
+      </div>
+      <div style="margin-top:10px;overflow:auto"><table><thead><tr><th>Nome</th><th>Percentual</th><th></th></tr></thead><tbody>
+      ${(DB.descontos||[]).map(d=>`<tr><td><b>${d.nome}</b></td><td>${pct(num(d.percentual))}</td><td style="white-space:nowrap"><button class="btn sm" onclick="descontoEditar('${d.id}')">✎</button> <button class="btn sm danger" onclick="descontoExcluir('${d.id}')">🗑</button></td></tr>`).join('')||`<tr><td colspan="3" class="muted" style="padding:14px">Nenhum desconto cadastrado.</td></tr>`}
+      </tbody></table></div>
+    </div></div>`;
+  }
+  h+=`<div class="print-only" style="margin-bottom:10px"><h2 style="font-size:16px">Tabela Comercial — ${DB.empresa}</h2><div class="muted">${desc?`Desconto: ${desc.nome} (${pct(num(desc.percentual))})`:'Sem desconto'} · ${new Date().toLocaleDateString('pt-BR')}</div></div>`;
+  if(!importado) return h+`<div class="card"><div class="bd muted" style="padding:24px">Nenhum preço importado ainda. Selecione o markup e clique em <b>Importar preços</b>.</div></div>`;
+  if(!DB.produtos.length) return h+`<div class="card"><div class="bd muted" style="padding:24px">Cadastre produtos.</div></div>`;
+  DB.produtos.forEach(p=>{
+    const tamanhos=[...new Set(p.variacoes.map(v=>v.tamanho))];
+    const tecidos=[...new Set(p.variacoes.map(v=>v.tecido).filter(t=>t&&t!=='—'))];
+    const pmap=(tc.precos&&tc.precos[p.id])||{};
+    h+=`<div class="card" style="margin-bottom:16px"><div class="hd"><div class="row" style="gap:12px;align-items:center;min-width:0">
+      ${p.imagem?`<img src="${p.imagem}" class="prod-thumb">`:''}
+      <div style="min-width:0"><h3>${p.modelo} <span class="tag blue">${p.codigo}</span></h3><div class="desc">${desc?`com desconto ${desc.nome} (${pct(num(desc.percentual))})`:'preço cheio'}</div></div>
+    </div></div><div class="bd" style="padding:0;overflow:auto">`;
+    if(tecidos.length){
+      h+=`<table><thead><tr><th>Tamanho</th>${tecidos.map((t,ci)=>`<th style="text-align:center;background:${tpCor(ci)};-webkit-print-color-adjust:exact;print-color-adjust:exact">Tecido ${t}</th>`).join('')}</tr></thead><tbody>`;
+      tamanhos.forEach(tz=>{ h+=`<tr><td><b>${tz}</b></td>${tecidos.map((tcd,ci)=>comCelula(pmap[comChave(tz,tcd)],`background:${tpCor(ci)};-webkit-print-color-adjust:exact;print-color-adjust:exact`)).join('')}</tr>`; });
+      h+=`</tbody></table>`;
+    } else {
+      h+=`<table><thead><tr><th>Medida</th><th>Dimensões</th><th style="text-align:right">Preço</th></tr></thead><tbody>`;
+      p.variacoes.forEach(v=>{ const bruto=pmap[comChave(v.tamanho,v.tecido)]; h+=`<tr><td><b>${v.tamanho}</b></td><td class="muted">${v.medida||'—'}</td><td style="text-align:right">${bruto==null?'—':(desc?`<span style="text-decoration:line-through;font-size:11px;color:var(--muted)">${money(bruto)}</span> <b>${money(comLiquido(bruto))}</b>`:`<b>${money(bruto)}</b>`)}</td></tr>`; });
       h+=`</tbody></table>`;
     }
     h+=`</div></div>`;
@@ -2301,7 +2450,7 @@ function currentPerfil(){ return DB.perfis.find(pf=>pf.key===SESSION.role); }
 function can(p){ if(SESSION&&SESSION.admin) return true; const pf=currentPerfil(); if(!pf) return false; if(pf.admin) return true; if(p==='impostos') return false; if(p==='relatorios') return true; return !!pf.editar; }
 
 /* ---------- Controle de menus por perfil ---------- */
-const MENU_LIST=[['dashboard','Dashboard'],['calc','Precificação'],['simulador','Simulador'],['produtos','Produtos'],['materiaprima','Matéria-Prima'],['engenharia','Engenharia'],['impostos','Markup'],['frete','Frete'],['tabelapreco','Tabela de Preço'],['relatorios','Relatórios'],['config','Configurações'],['backup','Backup']];
+const MENU_LIST=[['dashboard','Dashboard'],['calc','Precificação'],['simulador','Simulador'],['produtos','Produtos'],['materiaprima','Matéria-Prima'],['engenharia','Engenharia'],['impostos','Markup'],['frete','Frete'],['tabelapreco','Tabela de Preço'],['comercial','Tabela Comercial'],['relatorios','Relatórios'],['config','Configurações'],['backup','Backup']];
 function defaultMenuPerms(){return {
   gestor:{dashboard:true,calc:true,simulador:true,produtos:true,materiaprima:true,engenharia:true,impostos:false,frete:true,tabelapreco:true,relatorios:true,config:false},
   vendedor:{dashboard:true,calc:true,simulador:true,produtos:true,materiaprima:false,engenharia:false,impostos:false,frete:false,tabelapreco:true,relatorios:true,config:false}
