@@ -45,7 +45,7 @@ input,select{font-family:inherit}
 .top-actions{display:flex;align-items:center;gap:10px}
 .chip{display:inline-flex;align-items:center;gap:7px;background:var(--surface-2);border:1px solid var(--border);padding:7px 12px;border-radius:20px;font-size:12.5px;font-weight:600}
 .content{padding:24px 26px;max-width:1280px;width:100%}
-.eng-sticky{position:sticky;top:var(--topbar-h,62px);z-index:15;background:var(--bg);padding-top:10px;padding-bottom:8px;margin-top:-10px}
+.eng-sticky,.sticky-head{position:sticky;top:var(--topbar-h,62px);z-index:15;background:var(--bg);padding-top:10px;padding-bottom:8px;margin-top:-10px}
 
 /* Cards */
 .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow)}
@@ -173,7 +173,7 @@ tbody tr:hover{background:var(--surface-2)}
   .eng-block.skip-print{display:none!important}
   .eng-block .no-print{display:none!important}
   .eng-pend>td{background:transparent!important;box-shadow:none!important}
-  .eng-sticky{position:static!important;background:transparent!important}
+  .eng-sticky,.sticky-head{position:static!important;background:transparent!important}
   input,select{border:none!important;background:transparent!important;padding:0!important;-webkit-appearance:none;appearance:none}
 
   /* ===== Impressão da Engenharia: compacta e em paisagem para caber tudo ===== */
@@ -308,6 +308,7 @@ function ensureDBDefaults(){
   DB.descontos.forEach(d=>{ if(d.comissao==null) d.comissao=0; });
   DB.tabelaComercial=DB.tabelaComercial||{markupId:null,freteId:null,importadoEm:null,descontoId:null,precos:{},custos:{},meta:{},impostosPct:0,despesasPct:0,fretePct:0};
   DB.tabelaComercial.meta=DB.tabelaComercial.meta||{};
+  DB.precosTabela=DB.precosTabela||{}; // preços definidos enviados da Precificação para a Tabela de Preço
 }
 /* ---------- Markups (composições de impostos/despesas/comissão/margem) ---------- */
 function markupAtivoObj(){ return DB.markups.find(m=>m.id===DB.markupAtivo)||DB.markups[0]; }
@@ -349,7 +350,7 @@ let cloudState={connected:false, timer:null, dirty:false, pushing:false, since:0
 /* ---- Merge por registro (vários usuários ao mesmo tempo sem perder dados) ---- */
 // Coleções (listas) sincronizadas por chave de registro, e campos "avulsos" (último a salvar vence).
 const MERGE_KEYS={ produtos:'id', engenharias:'id', materiais:'id', markups:'id', fretes:'id', descontos:'id', usuarios:'id', perfis:'key', tabelasPreco:'id', historico:'id' };
-const MERGE_SCALARS=['empresa','taxes','desp','comissao','margemAlvo','margemMin','margem','margemExtra','markupAtivo','menuPerms','tpCfg','tabelaComercial'];
+const MERGE_SCALARS=['empresa','taxes','desp','comissao','margemAlvo','margemMin','margem','margemExtra','markupAtivo','menuPerms','tpCfg','tabelaComercial','precosTabela'];
 let cloudBase=null; // cópia do último estado em sincronia com o banco (referência para calcular o que mudou)
 function snap(o){ try{ return JSON.parse(JSON.stringify(o)); }catch(e){ return {}; } }
 function setBase(){ cloudBase=snap(DB); }
@@ -805,36 +806,38 @@ function viewCalc(){
   const somaImp = Object.values(DB.taxes).reduce((a,b)=>a+b,0);
   const somaDesp = Object.values(DB.desp).reduce((a,b)=>a+b,0);
   return `
-  <div class="card" style="margin-bottom:18px"><div class="bd">
-    <div class="row" style="justify-content:space-between;align-items:flex-end;gap:20px;flex-wrap:wrap">
-      <div class="field" style="margin:0;min-width:180px"><label>Markup (análise)</label>
+  <div class="sticky-head">
+  <div class="card" style="margin-bottom:8px"><div class="bd" style="padding:10px 14px">
+    <div class="row" style="align-items:flex-end;gap:12px;flex-wrap:wrap">
+      <div class="field" style="margin:0;min-width:150px"><label>Markup</label>
         <select class="inp" onchange="markupAtivar(this.value)">${DB.markups.map(m=>`<option value="${m.id}" ${m.id===DB.markupAtivo?'selected':''}>${m.nome}</option>`).join('')}</select></div>
-      <div class="field" style="margin:0;min-width:200px;flex:1">
-        <label>Margem de contribuição alvo: <b id="calMargemLbl">${pct(DB.margemAlvo)}</b></label>
+      <div class="field" style="margin:0;min-width:180px;flex:1">
+        <label>Margem alvo: <b id="calMargemLbl">${pct(DB.margemAlvo)}</b></label>
         <input type="range" class="slider" id="calMargem" min="0" max="60" step="0.5" value="${DB.margemAlvo}" oninput="el('calMargemLbl').textContent=this.value+'%';calcRerender()">
       </div>
-      <div class="field" style="margin:0;width:120px"><label>Comissão</label><div class="inp-group"><input class="inp" id="calCom" value="${DB.comissao}" oninput="calcRerender()"><span class="suffix">%</span></div></div>
-      <div class="field" style="margin:0;min-width:210px"><label>Produto</label>
+      <div class="field" style="margin:0;width:92px"><label>Comissão</label><div class="inp-group"><input class="inp" id="calCom" value="${DB.comissao}" oninput="calcRerender()"><span class="suffix">%</span></div></div>
+      <div class="field" style="margin:0;min-width:190px"><label>Produto</label>
         <select class="inp" id="calProd" onchange="calcRerender()">
           <option value="__all">Todos os produtos</option>
           ${DB.produtos.map(p=>`<option value="${p.id}">${p.modelo} (${p.familia})</option>`).join('')}
         </select></div>
     </div>
-    <div class="hint" style="margin-top:12px">Preencha o <b>custo de matéria-prima / industrial</b> e veja o <b>preço sugerido</b> pela margem-alvo. Você também pode <b>digitar o preço de venda</b> em cada variação — o sistema informa a <b>margem de contribuição resultante</b> desse preço. Impostos: <b>${pct(somaImp)}</b> · despesas variáveis: <b>${pct(somaDesp)}</b>. <a onclick="nav('impostos')" style="color:var(--primary);cursor:pointer">ajustar impostos/despesas</a></div>
   </div></div>
-  <div class="row" style="justify-content:space-between;margin-bottom:14px;align-items:center">
-    <div class="row" style="gap:12px">
+  <div class="row" style="justify-content:space-between;margin-bottom:6px;align-items:center;gap:10px;flex-wrap:wrap">
+    <div class="row" style="gap:10px;align-items:center">
       <div class="sub-tabs" style="margin:0" id="calModeBtns">
         <button data-m="matriz" class="${calcMode==='matriz'?'active':''}" onclick="setCalcMode('matriz')">▦ Matriz</button>
-        <button data-m="lista" class="${calcMode==='lista'?'active':''}" onclick="setCalcMode('lista')">☰ Lista detalhada</button>
+        <button data-m="lista" class="${calcMode==='lista'?'active':''}" onclick="setCalcMode('lista')">☰ Lista</button>
       </div>
-      <input class="inp" style="max-width:300px" id="calBusca" placeholder="🔎 Filtrar..." oninput="calFilter()">
+      <input class="inp sm" style="max-width:220px" id="calBusca" placeholder="🔎 Filtrar..." oninput="calFilter()">
+      <span class="hint">Imp. ${pct(somaImp)} · desp. ${pct(somaDesp)} · <a onclick="nav('impostos')" style="color:var(--primary);cursor:pointer">ajustar</a></span>
     </div>
     <div class="legend" style="margin:0"><span><span class="dot" style="background:var(--green)"></span>≥35%</span>
       <span><span class="dot" style="background:var(--amber)"></span>30–35%</span>
       <span><span class="dot" style="background:var(--red)"></span>&lt;30%</span></div>
   </div>
-  ${editavel?'':'<div class="card" style="margin-bottom:14px"><div class="bd muted">🔒 Perfil somente-consulta: custos não editáveis.</div></div>'}
+  ${editavel?'':'<div class="muted" style="margin-bottom:6px;font-size:12px">🔒 Perfil somente-consulta: custos não editáveis.</div>'}
+  </div>
   <div id="calTabela"></div>`;
 }
 let calcMode='matriz';
@@ -947,7 +950,8 @@ function renderMatriz(prods, editavel){
       inner=`<table><tr><th>Medida</th><th>Dimensões</th><th>Custo · preço · margem</th></tr>${body}</table>`;
     }
     return `<div class="card" style="margin-bottom:18px"><div class="hd"><div><h3>${p.modelo} <span class="tag blue">${p.familia}</span></h3>
-      <div class="desc">SKU ${p.codigo} · digite o custo em cada célula — preço sugerido e margem aparecem abaixo</div></div></div>
+      <div class="desc">SKU ${p.codigo} · digite o custo ou o preço em cada célula</div></div>
+      ${editavel?`<button class="btn primary sm" onclick="calcEnviarTabela('${p.id}')" title="Envia os preços definidos deste modelo para a Tabela de Preço">⤴ Enviar para Tabela de Preço</button>`:''}</div>
       <div class="bd" style="padding:0;overflow:auto">${inner}</div></div>`;
   }).join('');
   prods.forEach(p=>p.variacoes.forEach(v=>renderMatrixCell(v)));
@@ -1014,6 +1018,19 @@ function usarSugeridoM(vid){
   const {v}=findVar(vid); if(!v) return;
   v.precoManual=0; save(); renderMatrixCell(v);
 }
+// Preço efetivo de uma variação: o que você digitou (manual) ou o sugerido pela margem.
+function precoEfetivo(v){ if(num(v.precoManual)>0) return num(v.precoManual); if(num(v.custoTotal)<=0) return 0; return computeRow(v).sugestao.preco; }
+// Envia os preços definidos de um MODELO para a Tabela de Preço (congela com o markup já aplicado).
+function calcEnviarTabela(pid){
+  const p=DB.produtos.find(x=>x.id===pid); if(!p) return;
+  const map={}; let n=0;
+  p.variacoes.forEach(v=>{ const preco=precoEfetivo(v); if(preco>0){ map[comChave(v.tamanho,v.tecido)]=Math.round(preco*100)/100; n++; } });
+  if(!n){ alert('Informe o custo (ou digite o preço) das variações antes de enviar.'); return; }
+  DB.precosTabela=DB.precosTabela||{};
+  DB.precosTabela[pid]={ precos:map, enviadoEm:new Date().toISOString() };
+  save();
+  alert('Preços do modelo "'+p.modelo+'" enviados para a Tabela de Preço ('+n+' variação(ões)).');
+}
 
 /* ----- MODO LISTA: detalhado com preço de venda manual e as duas margens ----- */
 function renderLista(prods, editavel){
@@ -1032,7 +1049,8 @@ function renderLista(prods, editavel){
       <td id="mg_${v.id}"></td></tr>
       <tr id="det_${v.id}" class="hidden"><td colspan="10" style="padding:0;background:var(--surface-2)"><div id="detbox_${v.id}"></div></td></tr>`).join('');
     return `<div class="card" style="margin-bottom:18px"><div class="hd"><div><h3>${p.modelo} <span class="tag blue">${p.familia}</span></h3>
-      <div class="desc">SKU ${p.codigo} · ${p.categoria} · ${p.variacoes.length} variações · clique em ▸ para abrir impostos, comissão e despesas</div></div></div>
+      <div class="desc">SKU ${p.codigo} · ${p.categoria} · ${p.variacoes.length} variações · clique em ▸ para abrir impostos, comissão e despesas</div></div>
+      ${editavel?`<button class="btn primary sm" onclick="calcEnviarTabela('${p.id}')" title="Envia os preços definidos deste modelo para a Tabela de Preço">⤴ Enviar para Tabela de Preço</button>`:''}</div>
       <div class="bd" style="padding:0;overflow:auto"><table><thead><tr>
         <th>Variação</th><th>Tamanho</th><th>Tecido/Medida</th><th>Custo MP / industrial</th>
         <th>Impostos R$</th><th>Comissão+Desp.</th><th>Preço sugerido</th><th>Preço de venda</th><th>MC R$</th><th>Margem</th>
@@ -2034,20 +2052,19 @@ function baixarXlsx(aoa, nomeArq, nomePlan){
   });
 }
 function tabelaPrecoAOA(){
-  const mk=DB.markups.find(m=>m.id===tpCfg.markupId)||markupAtivoObj();
-  const frete=fretePct(tpCfg.freteId);
-  const fr=freteById(tpCfg.freteId); const freteLbl=fr?`${fr.nome} (${fr.tipo} ${pct(num(fr.percentual))})`:'—';
-  const aoa=[[`Tabela de Preço — ${DB.empresa}`],[`Markup: ${mk.nome} · Frete: ${freteLbl} · ${new Date().toLocaleDateString('pt-BR')}`],[]];
+  const fr=freteById(tpCfg&&tpCfg.freteId); const freteLbl=fr?`${fr.nome} (${fr.tipo} ${pct(num(fr.percentual))})`:'sem frete';
+  const aoa=[[`Tabela de Preço — ${DB.empresa}`],[`Frete: ${freteLbl} · ${new Date().toLocaleDateString('pt-BR')}`],[]];
   DB.produtos.forEach(p=>{
+    if(!tpEnviado(p.id)) return; // só modelos enviados
     const tamanhos=[...new Set(p.variacoes.map(v=>v.tamanho))];
     const tecidos=[...new Set(p.variacoes.map(v=>v.tecido).filter(t=>t&&t!=='—'))];
     aoa.push([`${p.modelo} (${p.codigo})`]);
     if(tecidos.length){
       aoa.push(['Tamanho', ...tecidos.map(t=>'Tecido '+t)]);
-      tamanhos.forEach(tz=>{ aoa.push([tz, ...tecidos.map(tc=>{ const v=p.variacoes.find(x=>x.tamanho===tz&&x.tecido===tc); return v?round2(precoTabela(num(v.custoTotal),mk,frete).preco):''; })]); });
+      tamanhos.forEach(tz=>{ aoa.push([tz, ...tecidos.map(tc=>{ const v=p.variacoes.find(x=>x.tamanho===tz&&x.tecido===tc); const pr=v?tpPreco(p.id,v):null; return pr==null?'':round2(pr); })]); });
     } else {
       aoa.push(['Tamanho','Dimensões','Preço']);
-      p.variacoes.forEach(v=>{ aoa.push([v.tamanho, v.medida||'', round2(precoTabela(num(v.custoTotal),mk,frete).preco)]); });
+      p.variacoes.forEach(v=>{ const pr=tpPreco(p.id,v); aoa.push([v.tamanho, v.medida||'', pr==null?'':round2(pr)]); });
     }
     aoa.push([]);
   });
@@ -2074,41 +2091,45 @@ function tabelaComercialAOA(){
   return aoa;
 }
 function exportComercialXlsx(){ if(!DB.tabelaComercial.importadoEm){ alert('Importe os preços antes de exportar.'); return; } baixarXlsx(tabelaComercialAOA(), `tabela-comercial-${new Date().toISOString().slice(0,10)}.xlsx`, 'Tabela Comercial'); }
+// Preço na Tabela = preço definido (enviado da Precificação) + frete opcional por cima.
+function tpEnviado(pid){ return DB.precosTabela && DB.precosTabela[pid]; }
+function tpPreco(pid, v){ const d=tpEnviado(pid); if(!d||!d.precos) return null; const b=d.precos[comChave(v.tamanho,v.tecido)]; if(b==null) return null; const f=fretePct(tpCfg&&tpCfg.freteId); return f>0? b*(1+f/100): b; }
 function viewTabelaPreco(){
-  if(!tpCfg) tpCfg={markupId:DB.markupAtivo, freteId:(DB.fretes[0]&&DB.fretes[0].id)};
-  if(!DB.markups.some(m=>m.id===tpCfg.markupId)) tpCfg.markupId=DB.markupAtivo;
-  if(!freteById(tpCfg.freteId)) tpCfg.freteId=(DB.fretes[0]&&DB.fretes[0].id);
-  const mk=DB.markups.find(m=>m.id===tpCfg.markupId)||markupAtivoObj();
+  if(!tpCfg) tpCfg={freteId:''};
+  if(tpCfg.freteId && !freteById(tpCfg.freteId)) tpCfg.freteId='';
   const editavel=can('editar');
-  const fr=freteById(tpCfg.freteId); const freteLbl=fr?`${fr.nome} (${fr.tipo} ${pct(num(fr.percentual))})`:'—';
-  const frete = fretePct(tpCfg.freteId);
-  let h=`<div class="card no-print" style="margin-bottom:16px"><div class="bd">
-    <div class="row" style="gap:14px;flex-wrap:wrap;align-items:flex-end">
-      <div class="field" style="margin:0;min-width:200px"><label>Markup</label><select class="inp" onchange="tpSet('markupId',this.value)">${DB.markups.map(m=>`<option value="${m.id}" ${m.id===tpCfg.markupId?'selected':''}>${m.nome}</option>`).join('')}</select></div>
-      <div class="field" style="margin:0;min-width:240px"><label>Frete</label><select class="inp" onchange="tpSet('freteId',this.value)">${DB.fretes.map(f=>`<option value="${f.id}" ${f.id===tpCfg.freteId?'selected':''}>${f.nome} · ${f.tipo} ${pct(num(f.percentual))}</option>`).join('')}</select></div>
+  const fr=freteById(tpCfg.freteId); const freteLbl=fr?`${fr.nome} (${fr.tipo} ${pct(num(fr.percentual))})`:'sem frete';
+  let h=`<div class="sticky-head">
+  <div class="card no-print" style="margin-bottom:8px"><div class="bd" style="padding:10px 14px">
+    <div class="row" style="gap:12px;flex-wrap:wrap;align-items:flex-end">
+      <div class="field" style="margin:0;min-width:220px"><label>Frete (opcional, sobre o preço)</label><select class="inp" onchange="tpSet('freteId',this.value)"><option value="">— sem frete —</option>${DB.fretes.map(f=>`<option value="${f.id}" ${f.id===tpCfg.freteId?'selected':''}>${f.nome} · ${f.tipo} ${pct(num(f.percentual))}</option>`).join('')}</select></div>
       <button class="btn sm" onclick="exportTabelaPrecoXlsx()">⬇ Excel</button>
       <button class="btn sm" onclick="window.print()">🖨 Imprimir</button>
-      <span class="hint">Altere o markup ou o frete e a tabela atualiza na hora.</span>
+      <span class="hint">Os preços vêm da <b>Precificação</b> (já com markup). Envie cada modelo pelo botão <b>“⤴ Enviar para Tabela de Preço”</b>.</span>
     </div>
-  </div></div>`;
-  h+=`<div class="print-only" style="margin-bottom:10px"><h2 style="font-size:16px">Tabela de Preço — ${DB.empresa}</h2><div class="muted">Markup: ${mk.nome} · Frete: ${freteLbl} · ${new Date().toLocaleDateString('pt-BR')}</div></div>`;
-  if(!DB.produtos.length){ return h+`<div class="card"><div class="bd muted" style="padding:24px">Cadastre produtos para gerar a tabela de preço.</div></div>`; }
+  </div></div>
+  <div class="print-only" style="margin-bottom:10px"><h2 style="font-size:16px">Tabela de Preço — ${DB.empresa}</h2><div class="muted">Frete: ${freteLbl} · ${new Date().toLocaleDateString('pt-BR')}</div></div>
+  </div>`;
+  if(!DB.produtos.length){ return h+`<div class="card"><div class="bd muted" style="padding:24px">Cadastre produtos e envie os preços pela Precificação.</div></div>`; }
   DB.produtos.forEach(p=>{
+    const enviado=tpEnviado(p.id);
     const tamanhos=[...new Set(p.variacoes.map(v=>v.tamanho))];
     const tecidos=[...new Set(p.variacoes.map(v=>v.tecido).filter(t=>t&&t!=='—'))];
     h+=`<div class="card" style="margin-bottom:16px"><div class="hd"><div class="row" style="gap:12px;align-items:center;min-width:0">
       ${p.imagem?`<img src="${p.imagem}" class="prod-thumb">`:''}
-      <div style="min-width:0"><h3>${p.modelo} <span class="tag blue">${p.codigo}</span></h3><div class="desc">${mk.nome} · ${freteLbl}</div></div>
-    </div></div><div class="bd" style="padding:0;overflow:auto">`;
+      <div style="min-width:0"><h3>${p.modelo} <span class="tag blue">${p.codigo}</span></h3><div class="desc">${enviado?`enviado em ${new Date(enviado.enviadoEm).toLocaleDateString('pt-BR')} · ${freteLbl}`:'não enviado'}</div></div>
+    </div></div>`;
+    if(!enviado){ h+=`<div class="bd muted" style="padding:16px">Preços deste modelo ainda não enviados. Vá em <b>Precificação</b>, defina os preços e clique em <b>⤴ Enviar para Tabela de Preço</b>.</div></div>`; return; }
+    h+=`<div class="bd" style="padding:0;overflow:auto">`;
     if(tecidos.length){
       h+=`<table><thead><tr><th>Tamanho</th>${tecidos.map((t,ci)=>`<th style="text-align:center;background:${tpCor(ci)};-webkit-print-color-adjust:exact;print-color-adjust:exact">Tecido ${t}</th>`).join('')}</tr></thead><tbody>`;
       tamanhos.forEach(tz=>{
-        h+=`<tr><td><b>${tz}</b></td>${tecidos.map((tc,ci)=>{ const v=p.variacoes.find(x=>x.tamanho===tz&&x.tecido===tc); const bg=`background:${tpCor(ci)};-webkit-print-color-adjust:exact;print-color-adjust:exact`; if(!v) return `<td class="muted" style="text-align:center;${bg}">—</td>`; const r=precoTabela(num(v.custoTotal),mk,frete); return `<td style="text-align:center;font-weight:700;${bg}">${money(r.preco)}</td>`; }).join('')}</tr>`;
+        h+=`<tr><td><b>${tz}</b></td>${tecidos.map((tc,ci)=>{ const v=p.variacoes.find(x=>x.tamanho===tz&&x.tecido===tc); const bg=`background:${tpCor(ci)};-webkit-print-color-adjust:exact;print-color-adjust:exact`; if(!v) return `<td class="muted" style="text-align:center;${bg}">—</td>`; const pr=tpPreco(p.id,v); return `<td style="text-align:center;font-weight:700;${bg}">${pr==null?'—':money(pr)}</td>`; }).join('')}</tr>`;
       });
       h+=`</tbody></table>`;
     } else {
       h+=`<table><thead><tr><th>Medida</th><th>Dimensões</th><th style="text-align:right">Preço de venda</th></tr></thead><tbody>`;
-      p.variacoes.forEach(v=>{ const r=precoTabela(num(v.custoTotal),mk,frete); h+=`<tr><td><b>${v.tamanho}</b></td><td class="muted">${v.medida||'—'}</td><td style="text-align:right;font-weight:700">${money(r.preco)}</td></tr>`; });
+      p.variacoes.forEach(v=>{ const pr=tpPreco(p.id,v); h+=`<tr><td><b>${v.tamanho}</b></td><td class="muted">${v.medida||'—'}</td><td style="text-align:right;font-weight:700">${pr==null?'—':money(pr)}</td></tr>`; });
       h+=`</tbody></table>`;
     }
     h+=`</div></div>`;
