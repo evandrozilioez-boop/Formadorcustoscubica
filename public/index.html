@@ -277,6 +277,7 @@ const DEFAULTS = {
   comissao: 3,
   margemAlvo: 35,
   margemMin: 30,
+  margemExtra: 0,
   produtos: [],
   materiais: [],
   engenharias: [],
@@ -296,20 +297,23 @@ function ensureDBDefaults(){
   DB.fretes=DB.fretes||[{id:uid(),nome:'FOB (sem frete)',tipo:'FOB',percentual:0}];
   // Markups: migra a config atual para um markup "Padrão" (permite cadastrar vários)
   if(!DB.markups || !DB.markups.length){
-    DB.markups=[{id:uid(),nome:'Padrão',taxes:{...DB.taxes},desp:{...DB.desp},comissao:DB.comissao,margemAlvo:DB.margemAlvo,margemMin:DB.margemMin}];
+    DB.markups=[{id:uid(),nome:'Padrão',taxes:{...DB.taxes},desp:{...DB.desp},comissao:DB.comissao,margemAlvo:DB.margemAlvo,margemMin:DB.margemMin,margemExtra:num(DB.margemExtra)}];
     DB.markupAtivo=DB.markups[0].id;
   }
+  DB.markups.forEach(m=>{ if(m.margemExtra==null) m.margemExtra=0; }); // migração: markups antigos sem margem extra
+  if(DB.margemExtra==null) DB.margemExtra=0;
   if(!DB.markupAtivo || !DB.markups.some(m=>m.id===DB.markupAtivo)) DB.markupAtivo=DB.markups[0].id;
   // Tabela Comercial: preços importados (congelados) + descontos pré-cadastrados
   DB.descontos=DB.descontos||[{id:uid(),nome:'À vista',percentual:5,comissao:3},{id:uid(),nome:'Atacado',percentual:10,comissao:2}];
   DB.descontos.forEach(d=>{ if(d.comissao==null) d.comissao=0; });
-  DB.tabelaComercial=DB.tabelaComercial||{markupId:null,freteId:null,importadoEm:null,descontoId:null,precos:{},custos:{},impostosPct:0,despesasPct:0,fretePct:0};
+  DB.tabelaComercial=DB.tabelaComercial||{markupId:null,freteId:null,importadoEm:null,descontoId:null,precos:{},custos:{},meta:{},impostosPct:0,despesasPct:0,fretePct:0};
+  DB.tabelaComercial.meta=DB.tabelaComercial.meta||{};
 }
 /* ---------- Markups (composições de impostos/despesas/comissão/margem) ---------- */
 function markupAtivoObj(){ return DB.markups.find(m=>m.id===DB.markupAtivo)||DB.markups[0]; }
-function markupAplicar(mk){ DB.taxes={...mk.taxes}; DB.desp={...mk.desp}; DB.comissao=mk.comissao; DB.margemAlvo=mk.margemAlvo; DB.margemMin=mk.margemMin; }
+function markupAplicar(mk){ DB.taxes={...mk.taxes}; DB.desp={...mk.desp}; DB.comissao=mk.comissao; DB.margemAlvo=mk.margemAlvo; DB.margemMin=mk.margemMin; DB.margemExtra=num(mk.margemExtra); }
 function markupAtivar(id){ DB.markupAtivo=id; markupAplicar(markupAtivoObj()); save(); render(); }
-function markupNovo(){ const nome=prompt('Nome do novo markup (ex.: Marketplace, Atacado):',''); if(nome===null) return; const base=markupAtivoObj(); const mk={id:uid(),nome:(nome.trim()||('Markup '+(DB.markups.length+1))),taxes:{...base.taxes},desp:{...base.desp},comissao:base.comissao,margemAlvo:base.margemAlvo,margemMin:base.margemMin}; DB.markups.push(mk); DB.markupAtivo=mk.id; markupAplicar(mk); save(); render(); }
+function markupNovo(){ const nome=prompt('Nome do novo markup (ex.: Marketplace, Atacado):',''); if(nome===null) return; const base=markupAtivoObj(); const mk={id:uid(),nome:(nome.trim()||('Markup '+(DB.markups.length+1))),taxes:{...base.taxes},desp:{...base.desp},comissao:base.comissao,margemAlvo:base.margemAlvo,margemMin:base.margemMin,margemExtra:num(base.margemExtra)}; DB.markups.push(mk); DB.markupAtivo=mk.id; markupAplicar(mk); save(); render(); }
 function markupRenomear(){ const mk=markupAtivoObj(); const nome=prompt('Renomear markup:',mk.nome); if(nome===null) return; mk.nome=nome.trim()||mk.nome; save(); render(); }
 function markupExcluir(){ if(DB.markups.length<=1){ alert('Deve existir ao menos um markup.'); return; } const mk=markupAtivoObj(); if(!confirm('Excluir o markup "'+mk.nome+'"?')) return; DB.markups=DB.markups.filter(m=>m.id!==mk.id); DB.markupAtivo=DB.markups[0].id; markupAplicar(markupAtivoObj()); save(); render(); }
 function defaultPerfis(){ return [
@@ -345,7 +349,7 @@ let cloudState={connected:false, timer:null, dirty:false, pushing:false, since:0
 /* ---- Merge por registro (vários usuários ao mesmo tempo sem perder dados) ---- */
 // Coleções (listas) sincronizadas por chave de registro, e campos "avulsos" (último a salvar vence).
 const MERGE_KEYS={ produtos:'id', engenharias:'id', materiais:'id', markups:'id', fretes:'id', descontos:'id', usuarios:'id', perfis:'key', tabelasPreco:'id', historico:'id' };
-const MERGE_SCALARS=['empresa','taxes','desp','comissao','margemAlvo','margemMin','margem','markupAtivo','menuPerms','tpCfg','tabelaComercial'];
+const MERGE_SCALARS=['empresa','taxes','desp','comissao','margemAlvo','margemMin','margem','margemExtra','markupAtivo','menuPerms','tpCfg','tabelaComercial'];
 let cloudBase=null; // cópia do último estado em sincronia com o banco (referência para calcular o que mudou)
 function snap(o){ try{ return JSON.parse(JSON.stringify(o)); }catch(e){ return {}; } }
 function setBase(){ cloudBase=snap(DB); }
@@ -589,11 +593,13 @@ function somaPercentuais(taxes, desp, comissao){
 }
 
 // Calcula preço a partir da margem-alvo (formação de preço)
-function precificar({custo, taxes, desp, comissao, margem}){
+function precificar({custo, taxes, desp, comissao, margem, margemExtra}){
   const soma = somaPercentuais(taxes, desp, comissao);
   const m = num(margem)/100;
   const divisor = 1 - soma - m;
-  const preco = divisor>0 ? custo/divisor : Infinity;
+  let preco = divisor>0 ? custo/divisor : Infinity;
+  const ex = num(margemExtra)/100;               // margem extra: SOMA no preço, mas NÃO entra no divisor do markup
+  if(ex>0 && isFinite(preco)) preco = preco*(1+ex);
   return montarResultado(preco, {custo, taxes, desp, comissao});
 }
 
@@ -712,7 +718,7 @@ function todasVariacoes(){
 function calcVar(v, over={}){
   return precificar({
     custo:v.custoTotal, taxes:over.taxes||DB.taxes, desp:over.desp||DB.desp,
-    comissao:over.comissao??DB.comissao, margem:over.margem??DB.margemAlvo
+    comissao:over.comissao??DB.comissao, margem:over.margem??DB.margemAlvo, margemExtra:over.margemExtra??DB.margemExtra
   });
 }
 
@@ -839,7 +845,7 @@ function initCalc(){ calcRerender(); }
 function findVar(vid){ for(const p of DB.produtos){ const v=p.variacoes.find(x=>x.id===vid); if(v) return {p,v}; } return {}; }
 function computeRow(v){
   const base={custo:num(v.custoTotal), taxes:DB.taxes, desp:DB.desp, comissao:num(el('calCom').value)};
-  const sugestao=precificar({...base, margem:num(el('calMargem').value)});
+  const sugestao=precificar({...base, margem:num(el('calMargem').value), margemExtra:num(DB.margemExtra)});
   const manual=num(v.precoManual);
   const usouManual = manual>0;
   const efetivo = usouManual ? margemDoPreco(manual, base) : sugestao;
@@ -1073,7 +1079,7 @@ function simRun(){
   let r;
   const precoManual=el('sPreco').value.trim();
   if(precoManual!==''){ r=margemDoPreco(num(precoManual),{custo:v.custoTotal,taxes,desp,comissao}); }
-  else { r=precificar({custo:v.custoTotal,taxes,desp,comissao,margem:num(el('sMargem').value)}); }
+  else { r=precificar({custo:v.custoTotal,taxes,desp,comissao,margem:num(el('sMargem').value),margemExtra:num(DB.margemExtra)}); }
   el('sGauge').innerHTML=gaugeSVG(r.mcPct);
   el('sMcPct').textContent=pct(r.mcPct);
   const st=margemStatus(r.mcPct);el('sMcPct').style.color=st.hex;
@@ -1921,7 +1927,10 @@ function viewImpostos(){
     <div class="bd"><div class="grid g-2">
       <div class="field"><label>Margem alvo (verde ≥)</label><div class="inp-group"><input class="inp" id="gMargAlvo" value="${DB.margemAlvo}"><span class="suffix">%</span></div></div>
       <div class="field"><label>Margem mínima aceitável</label><div class="inp-group"><input class="inp" id="gMargMin" value="${DB.margemMin}"><span class="suffix">%</span></div></div>
-    </div></div></div>
+      <div class="field" style="grid-column:span 2"><label>Margem extra <span class="muted">(soma no preço, mas NÃO entra no divisor do markup)</span></label><div class="inp-group"><input class="inp" id="gMargExtra" value="${num(DB.margemExtra)}"><span class="suffix">%</span></div></div>
+    </div>
+    <div class="hint" style="margin-top:6px">A margem extra é aplicada por cima do preço calculado (ex.: preço 1000 + margem extra 5% = 1050), sem afetar o cálculo do markup.</div>
+    </div></div>
   <div class="card" style="margin-top:18px"><div class="bd row" style="justify-content:space-between">
     <div class="muted">Salva no markup <b>"${mk.nome}"</b>. Alterações de imposto ficam no histórico.</div>
     <button class="btn primary" onclick="salvarImpostos()">💾 Salvar markup "${mk.nome}"</button></div></div>`;
@@ -1933,8 +1942,9 @@ function salvarImpostos(){
   ['freteVenda','marketplace','bonificacoes','descontos','marketing','outras'].forEach(k=>DB.desp[k]=num(el('gd_'+k).value));
   DB.comissao=num(el('gcom').value);
   DB.margemAlvo=num(el('gMargAlvo').value); DB.margemMin=num(el('gMargMin').value);
+  if(el('gMargExtra')) DB.margemExtra=num(el('gMargExtra').value);
   // grava no markup ativo
-  const mk=markupAtivoObj(); mk.taxes={...DB.taxes}; mk.desp={...DB.desp}; mk.comissao=DB.comissao; mk.margemAlvo=DB.margemAlvo; mk.margemMin=DB.margemMin;
+  const mk=markupAtivoObj(); mk.taxes={...DB.taxes}; mk.desp={...DB.desp}; mk.comissao=DB.comissao; mk.margemAlvo=DB.margemAlvo; mk.margemMin=DB.margemMin; mk.margemExtra=num(DB.margemExtra);
   save();alert('Markup "'+mk.nome+'" salvo.');render();
 }
 
@@ -1980,7 +1990,7 @@ function tpCor(i){ return TP_CORES[i%TP_CORES.length]; }
 function precoTabela(custo, mk, fretePctVal){
   // Preço da tabela = preço com o markup e, POR CIMA, o percentual de frete.
   // Ex.: preço 1000 + frete 10% = 1100.
-  const r=precificar({custo, taxes:mk.taxes, desp:mk.desp, comissao:mk.comissao, margem:mk.margemAlvo});
+  const r=precificar({custo, taxes:mk.taxes, desp:mk.desp, comissao:mk.comissao, margem:mk.margemAlvo, margemExtra:mk.margemExtra});
   const f=num(fretePctVal);
   if(f>0 && isFinite(r.preco)){ r.precoSemFrete=r.preco; r.frete=r.preco*(f/100); r.preco=r.preco*(1+f/100); }
   return r;
@@ -2083,18 +2093,19 @@ function viewTabelaPreco(){
 let descontoEdit=null, comGerenciar=false;
 function comChave(tz,tc){ return tz+''+(tc||'—'); }
 function sumPct(o){ let s=0; for(const k in (o||{})) s+=num(o[k]); return s; }
-function comImportar(){
-  const tc=DB.tabelaComercial;
+function comImportadoPID(pid){ const tc=DB.tabelaComercial; return !!((tc.meta&&tc.meta[pid]) || (tc.precos&&tc.precos[pid]&&Object.keys(tc.precos[pid]).length)); }
+// Congela os preços de UM produto (item), usando o markup/frete selecionados.
+function _comImportaPID(tc,pid){
+  const p=DB.produtos.find(x=>x.id===pid); if(!p) return;
   const mk=DB.markups.find(m=>m.id===tc.markupId)||markupAtivoObj();
   const frete=fretePct(tc.freteId);
-  const precos={}, custos={};
-  DB.produtos.forEach(p=>{ precos[p.id]={}; custos[p.id]={}; p.variacoes.forEach(v=>{ const key=comChave(v.tamanho,v.tecido); precos[p.id][key]=Math.round(precoTabela(num(v.custoTotal),mk,frete).preco*100)/100; custos[p.id][key]=Math.round(num(v.custoTotal)*100)/100; }); });
-  tc.precos=precos; tc.custos=custos;
-  tc.impostosPct=sumPct(mk.taxes); tc.despesasPct=sumPct(mk.desp); tc.fretePct=num(frete); // guardados para o cálculo da MC
-  tc.importadoEm=new Date().toISOString(); tc.markupNome=mk.nome;
-  save(); render();
-  alert('Preços importados e congelados na Tabela Comercial.');
+  tc.precos=tc.precos||{}; tc.custos=tc.custos||{}; tc.meta=tc.meta||{};
+  tc.precos[pid]={}; tc.custos[pid]={};
+  p.variacoes.forEach(v=>{ const key=comChave(v.tamanho,v.tecido); tc.precos[pid][key]=Math.round(precoTabela(num(v.custoTotal),mk,frete).preco*100)/100; tc.custos[pid][key]=Math.round(num(v.custoTotal)*100)/100; });
+  tc.meta[pid]={impostosPct:sumPct(mk.taxes),despesasPct:sumPct(mk.desp),fretePct:num(frete),markupNome:mk.nome,importadoEm:new Date().toISOString()};
 }
+function comImportarProduto(pid){ const tc=DB.tabelaComercial; _comImportaPID(tc,pid); tc.importadoEm=new Date().toISOString(); save(); render(); }
+function comImportarTodos(){ const tc=DB.tabelaComercial; if(!DB.produtos.length) return; DB.produtos.forEach(p=>_comImportaPID(tc,p.id)); tc.importadoEm=new Date().toISOString(); save(); render(); alert('Todos os itens foram importados.'); }
 function comSet(k,v){ DB.tabelaComercial[k]=v; save(); render(); }
 function descontoAtual(){ return (DB.descontos||[]).find(d=>d.id===DB.tabelaComercial.descontoId); }
 function comLiquido(bruto){ const d=descontoAtual(); const p=d?num(d.percentual):0; return bruto*(1-p/100); }
@@ -2106,7 +2117,8 @@ function comMC(pid, chave){
   const pv=comLiquido(bruto);
   const custo=(tc.custos && tc.custos[pid] && tc.custos[pid][chave])||0;
   const comiss=d?num(d.comissao):0;
-  const varPct=num(tc.impostosPct)+num(tc.despesasPct)+num(tc.fretePct||0)+comiss; // impostos + despesas + frete + comissão do rep.
+  const meta=(tc.meta&&tc.meta[pid])||{impostosPct:tc.impostosPct,despesasPct:tc.despesasPct,fretePct:tc.fretePct}; // percentuais do markup usado NAQUELE item
+  const varPct=num(meta.impostosPct)+num(meta.despesasPct)+num(meta.fretePct||0)+comiss; // impostos + despesas + frete + comissão do rep.
   const mcv=pv*(1-varPct/100)-custo;
   return { pv, mc:mcv, mcPct: pv>0?(mcv/pv*100):0, comiss, custo };
 }
@@ -2144,13 +2156,13 @@ function viewComercial(){
     <div class="row" style="gap:14px;flex-wrap:wrap;align-items:flex-end">
       <div class="field" style="margin:0;min-width:190px"><label>Markup a importar</label><select class="inp" onchange="comSet('markupId',this.value)">${DB.markups.map(m=>`<option value="${m.id}" ${m.id===tc.markupId?'selected':''}>${m.nome}</option>`).join('')}</select></div>
       <div class="field" style="margin:0;min-width:210px"><label>Frete (opcional)</label><select class="inp" onchange="comSet('freteId',this.value)"><option value="">— sem frete —</option>${DB.fretes.map(f=>`<option value="${f.id}" ${f.id===tc.freteId?'selected':''}>${f.nome} · ${f.tipo} ${pct(num(f.percentual))}</option>`).join('')}</select></div>
-      ${editavel?`<button class="btn primary sm" onclick="comImportar()">⬇ ${importado?'Reimportar':'Importar'} preços</button>`:''}
+      ${editavel?`<button class="btn sm" onclick="comImportarTodos()">⬇ Importar todos</button>`:''}
       <div class="field" style="margin:0;min-width:190px"><label>Desconto aplicado</label><select class="inp" onchange="comSet('descontoId',this.value)"><option value="">— sem desconto —</option>${(DB.descontos||[]).map(d=>`<option value="${d.id}" ${d.id===tc.descontoId?'selected':''}>${d.nome} (${pct(num(d.percentual))})</option>`).join('')}</select></div>
       ${editavel?`<button class="btn sm" onclick="comGerenciar=!comGerenciar;render()">⚙ ${comGerenciar?'Ocultar descontos':'Gerenciar descontos'}</button>`:''}
       <button class="btn sm" onclick="exportComercialXlsx()">⬇ Excel</button>
       <button class="btn sm" onclick="window.print()">🖨 Imprimir</button>
     </div>
-    <div class="hint">${importado?`Importado em ${new Date(tc.importadoEm).toLocaleString('pt-BR')}${tc.markupNome?` · markup "${tc.markupNome}"`:''}. Os valores ficam <b>congelados</b> até você reimportar.`:'Escolha o markup e clique em Importar preços para congelar a tabela.'}</div>
+    <div class="hint">Escolha o markup e o frete e importe <b>item por item</b> pelo botão de cada produto (ou use "Importar todos"). Os valores ficam <b>congelados</b> por item até você reimportar aquele produto.</div>
   </div></div>`;
   if(editavel && comGerenciar){
     h+=`<div class="card no-print" style="margin-bottom:16px"><div class="hd"><div><h3>Descontos pré-cadastrados</h3><div class="desc">${(DB.descontos||[]).length} desconto(s)</div></div></div><div class="bd">
@@ -2168,16 +2180,19 @@ function viewComercial(){
     </div></div>`;
   }
   h+=`<div class="print-only" style="margin-bottom:10px"><h2 style="font-size:16px">Tabela Comercial — ${DB.empresa}</h2><div class="muted">${desc?`Desconto: ${desc.nome} (${pct(num(desc.percentual))})`:'Sem desconto'} · ${new Date().toLocaleDateString('pt-BR')}</div></div>`;
-  if(!importado) return h+`<div class="card"><div class="bd muted" style="padding:24px">Nenhum preço importado ainda. Selecione o markup e clique em <b>Importar preços</b>.</div></div>`;
   if(!DB.produtos.length) return h+`<div class="card"><div class="bd muted" style="padding:24px">Cadastre produtos.</div></div>`;
   DB.produtos.forEach(p=>{
+    const imp=comImportadoPID(p.id);
+    const meta=(tc.meta&&tc.meta[p.id])||{};
     const tamanhos=[...new Set(p.variacoes.map(v=>v.tamanho))];
     const tecidos=[...new Set(p.variacoes.map(v=>v.tecido).filter(t=>t&&t!=='—'))];
     const pmap=(tc.precos&&tc.precos[p.id])||{};
     h+=`<div class="card" style="margin-bottom:16px"><div class="hd"><div class="row" style="gap:12px;align-items:center;min-width:0">
       ${p.imagem?`<img src="${p.imagem}" class="prod-thumb">`:''}
-      <div style="min-width:0"><h3>${p.modelo} <span class="tag blue">${p.codigo}</span></h3><div class="desc">${desc?`com desconto ${desc.nome} (${pct(num(desc.percentual))})`:'preço cheio'}</div></div>
-    </div></div><div class="bd" style="padding:0;overflow:auto">`;
+      <div style="min-width:0"><h3>${p.modelo} <span class="tag blue">${p.codigo}</span></h3><div class="desc">${imp?`${meta.markupNome?`markup "${meta.markupNome}"`:'importado'}${meta.importadoEm?` · ${new Date(meta.importadoEm).toLocaleDateString('pt-BR')}`:''}${desc?` · desconto ${desc.nome}`:''}`:'não importado'}</div></div>
+    </div>${editavel?`<button class="btn ${imp?'sm':'primary sm'}" onclick="comImportarProduto('${p.id}')" title="Congelar os preços deste item com o markup/frete selecionados">⬇ ${imp?'Reimportar':'Importar'}</button>`:''}</div>`;
+    if(!imp){ h+=`<div class="bd muted" style="padding:16px">Item ainda não importado.${editavel?' Clique em <b>Importar</b> para congelar os preços deste produto.':''}</div></div>`; return; }
+    h+=`<div class="bd" style="padding:0;overflow:auto">`;
     if(tecidos.length){
       h+=`<table><thead><tr><th>Tamanho</th>${tecidos.map((t,ci)=>`<th style="text-align:center;background:${tpCor(ci)};-webkit-print-color-adjust:exact;print-color-adjust:exact">Tecido ${t}</th>`).join('')}</tr></thead><tbody>`;
       tamanhos.forEach(tz=>{ h+=`<tr><td><b>${tz}</b></td>${tecidos.map((tcd,ci)=>comCelula(p.id,comChave(tz,tcd),`background:${tpCor(ci)};-webkit-print-color-adjust:exact;print-color-adjust:exact`,isAdmin)).join('')}</tr>`; });
