@@ -45,6 +45,7 @@ input,select{font-family:inherit}
 .top-actions{display:flex;align-items:center;gap:10px}
 .chip{display:inline-flex;align-items:center;gap:7px;background:var(--surface-2);border:1px solid var(--border);padding:7px 12px;border-radius:20px;font-size:12.5px;font-weight:600}
 .content{padding:24px 26px;max-width:1280px;width:100%}
+.eng-sticky{position:sticky;top:var(--topbar-h,62px);z-index:15;background:var(--bg);padding-top:10px;padding-bottom:8px;margin-top:-10px}
 
 /* Cards */
 .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow)}
@@ -172,6 +173,7 @@ tbody tr:hover{background:var(--surface-2)}
   .eng-block.skip-print{display:none!important}
   .eng-block .no-print{display:none!important}
   .eng-pend>td{background:transparent!important;box-shadow:none!important}
+  .eng-sticky{position:static!important;background:transparent!important}
   input,select{border:none!important;background:transparent!important;padding:0!important;-webkit-appearance:none;appearance:none}
 
   /* ===== Impressão da Engenharia: compacta e em paisagem para caber tudo ===== */
@@ -299,8 +301,9 @@ function ensureDBDefaults(){
   }
   if(!DB.markupAtivo || !DB.markups.some(m=>m.id===DB.markupAtivo)) DB.markupAtivo=DB.markups[0].id;
   // Tabela Comercial: preços importados (congelados) + descontos pré-cadastrados
-  DB.descontos=DB.descontos||[{id:uid(),nome:'À vista',percentual:5},{id:uid(),nome:'Atacado',percentual:10}];
-  DB.tabelaComercial=DB.tabelaComercial||{markupId:null,freteId:null,importadoEm:null,descontoId:null,precos:{}};
+  DB.descontos=DB.descontos||[{id:uid(),nome:'À vista',percentual:5,comissao:3},{id:uid(),nome:'Atacado',percentual:10,comissao:2}];
+  DB.descontos.forEach(d=>{ if(d.comissao==null) d.comissao=0; });
+  DB.tabelaComercial=DB.tabelaComercial||{markupId:null,freteId:null,importadoEm:null,descontoId:null,precos:{},custos:{},impostosPct:0,despesasPct:0,fretePct:0};
 }
 /* ---------- Markups (composições de impostos/despesas/comissão/margem) ---------- */
 function markupAtivoObj(){ return DB.markups.find(m=>m.id===DB.markupAtivo)||DB.markups[0]; }
@@ -688,9 +691,12 @@ function nav(v){
   el('viewSub').textContent=VIEW_META[v][1];
   render();
 }
+function ajustarTopbarH(){ const t=document.querySelector('.topbar'); if(t) document.documentElement.style.setProperty('--topbar-h', t.offsetHeight+'px'); }
+window.addEventListener('resize', ajustarTopbarH);
 function render(){
   const c = el('content');
   if(!SESSION){return;}
+  ajustarTopbarH();
   c.innerHTML = ({dashboard:viewDashboard, calc:viewCalc, simulador:viewSimulador,
     produtos:viewProdutos, materiaprima:viewMateriaPrima, engenharia:viewEngenharia, impostos:viewImpostos, frete:viewFrete, tabelapreco:viewTabelaPreco, comercial:viewComercial, relatorios:viewRelatorios, config:viewConfig, backup:viewBackup}[currentView])();
   if(currentView==='calc') initCalc();
@@ -1303,7 +1309,7 @@ function viewEngenharia(){
   const irmaos = eng ? (eng.produtoId?DB.engenharias.filter(e=>e.produtoId===eng.produtoId):DB.engenharias.filter(e=>!e.produtoId&&engSkuKey(e)===engSkuKey(eng))) : [];
   const opts = produtos.map(p=>`<option value="P:${p.id}" ${curVal==='P:'+p.id?'selected':''}>${p.codigo} — ${p.modelo}</option>`).join('')
     + orphanSkus.map(s=>`<option value="S:${s}" ${curVal==='S:'+s?'selected':''}>${s} (importada)</option>`).join('');
-  let h=`<div class="card no-print" style="margin-bottom:14px"><div class="bd">
+  let h=`<div class="eng-sticky"><div class="card no-print" style="margin-bottom:14px"><div class="bd">
     <div class="row" style="justify-content:space-between;gap:14px;flex-wrap:wrap;align-items:flex-end">
       <div class="row" style="gap:10px;align-items:flex-end">
         <div class="field" style="margin:0;min-width:280px"><label>SKU / Produto</label>
@@ -1319,7 +1325,7 @@ function viewEngenharia(){
         <button class="btn sm" onclick="engPrintTodos()">🖨 Imprimir todos</button>
       </div>`:''}
     </div></div></div>`;
-  if(!eng) return h+semEngenharia();
+  if(!eng) return h+'</div>'+semEngenharia();
   h+=`<div class="row no-print" style="align-items:center;gap:12px;margin-bottom:16px">
     <span class="muted" style="font-size:12.5px">Tamanhos deste SKU:</span>
     <div class="sub-tabs" style="margin:0;flex-wrap:wrap">
@@ -1327,7 +1333,7 @@ function viewEngenharia(){
     </div>
     ${editavel&&eng.produtoId&&irmaos.length>1?`<button class="btn primary sm" onclick="engReplicarComposicao()" title="Copia toda a composição deste tamanho para os demais; depois você ajusta dimensões e quantidades em cada um">↧ Replicar composição p/ os demais tamanhos</button>
     <button class="btn sm" onclick="engAplicarPadroes()" title="Copia apenas os itens marcados como Padrão para as fichas dos outros tamanhos">↧ Só itens padrão</button>`:''}
-  </div>`;
+  </div></div>`;
   h+=`<div class="card no-print" style="margin-bottom:18px"><div class="hd"><div><h3>${eng.item||'—'} <span class="tag blue">${eng.sku||'SKU'}</span></h3><div class="desc">Composição do tamanho <b>${eng.tamanho||'—'}</b> · custo automático pela matéria-prima</div></div></div>
     <div class="bd"><div class="grid g-3">
     ${ENG_IDENT.map(([f,l])=>{ const auto=(f==='revpor'||f==='ultrev'); const attrs=auto?'readonly':(`oninput="engField('${f}',this.value)"`+(editavel?'':' disabled')); return `<div class="field"><label>${l}${auto?' <span class="muted">(auto)</span>':''}</label><input class="inp" id="engid_${f}" value="${(eng[f]||'').toString().replace(/"/g,'&quot;')}" ${attrs}></div>`; }).join('')}
@@ -2076,32 +2082,54 @@ function viewTabelaPreco(){
 /* ---------- Tabela Comercial (preços importados/congelados + descontos) ---------- */
 let descontoEdit=null, comGerenciar=false;
 function comChave(tz,tc){ return tz+''+(tc||'—'); }
+function sumPct(o){ let s=0; for(const k in (o||{})) s+=num(o[k]); return s; }
 function comImportar(){
   const tc=DB.tabelaComercial;
   const mk=DB.markups.find(m=>m.id===tc.markupId)||markupAtivoObj();
   const frete=fretePct(tc.freteId);
-  const precos={};
-  DB.produtos.forEach(p=>{ precos[p.id]={}; p.variacoes.forEach(v=>{ const r=precoTabela(num(v.custoTotal),mk,frete); precos[p.id][comChave(v.tamanho,v.tecido)]=Math.round(r.preco*100)/100; }); });
-  tc.precos=precos; tc.importadoEm=new Date().toISOString(); tc.markupNome=mk.nome;
+  const precos={}, custos={};
+  DB.produtos.forEach(p=>{ precos[p.id]={}; custos[p.id]={}; p.variacoes.forEach(v=>{ const key=comChave(v.tamanho,v.tecido); precos[p.id][key]=Math.round(precoTabela(num(v.custoTotal),mk,frete).preco*100)/100; custos[p.id][key]=Math.round(num(v.custoTotal)*100)/100; }); });
+  tc.precos=precos; tc.custos=custos;
+  tc.impostosPct=sumPct(mk.taxes); tc.despesasPct=sumPct(mk.desp); tc.fretePct=num(frete); // guardados para o cálculo da MC
+  tc.importadoEm=new Date().toISOString(); tc.markupNome=mk.nome;
   save(); render();
   alert('Preços importados e congelados na Tabela Comercial.');
 }
 function comSet(k,v){ DB.tabelaComercial[k]=v; save(); render(); }
 function descontoAtual(){ return (DB.descontos||[]).find(d=>d.id===DB.tabelaComercial.descontoId); }
 function comLiquido(bruto){ const d=descontoAtual(); const p=d?num(d.percentual):0; return bruto*(1-p/100); }
+// Margem de contribuição do item no preço com desconto, usando a comissão do representante daquele desconto.
+function comMC(pid, chave){
+  const tc=DB.tabelaComercial; const d=descontoAtual();
+  const bruto=tc.precos && tc.precos[pid] && tc.precos[pid][chave];
+  if(bruto==null) return null;
+  const pv=comLiquido(bruto);
+  const custo=(tc.custos && tc.custos[pid] && tc.custos[pid][chave])||0;
+  const comiss=d?num(d.comissao):0;
+  const varPct=num(tc.impostosPct)+num(tc.despesasPct)+num(tc.fretePct||0)+comiss; // impostos + despesas + frete + comissão do rep.
+  const mcv=pv*(1-varPct/100)-custo;
+  return { pv, mc:mcv, mcPct: pv>0?(mcv/pv*100):0, comiss, custo };
+}
+function mcBadge(mcPct){
+  const alvo=num(DB.margemAlvo), min=num(DB.margemMin);
+  const cor = mcPct>=alvo?'var(--green)': (mcPct>=min?'var(--amber)':'var(--red)');
+  return `<div style="font-size:10.5px;font-weight:700;color:${cor}" title="Margem de contribuição">MC ${mcPct.toFixed(1).replace('.',',')}%</div>`;
+}
 function descontoSalvar(){ const nome=el('dscNome').value.trim(); if(!nome){ alert('Informe o nome do desconto.'); return; }
-  const reg={nome,percentual:num(el('dscPct').value)};
+  const reg={nome,percentual:num(el('dscPct').value),comissao:num(el('dscCom').value)};
   if(descontoEdit){ const d=(DB.descontos||[]).find(x=>x.id===descontoEdit); if(d) Object.assign(d,reg); descontoEdit=null; }
   else { (DB.descontos||(DB.descontos=[])).push({id:uid(),...reg}); }
   save(); render(); }
-function descontoEditar(id){ const d=(DB.descontos||[]).find(x=>x.id===id); if(!d) return; descontoEdit=id; el('dscNome').value=d.nome; el('dscPct').value=num(d.percentual); window.scrollTo({top:0,behavior:'smooth'}); }
+function descontoEditar(id){ const d=(DB.descontos||[]).find(x=>x.id===id); if(!d) return; descontoEdit=id; el('dscNome').value=d.nome; el('dscPct').value=num(d.percentual); el('dscCom').value=num(d.comissao||0); window.scrollTo({top:0,behavior:'smooth'}); }
 function descontoExcluir(id){ const d=(DB.descontos||[]).find(x=>x.id===id); if(!d) return; if(!confirm('Excluir o desconto "'+d.nome+'"?')) return; DB.descontos=DB.descontos.filter(x=>x.id!==id); if(DB.tabelaComercial.descontoId===id) DB.tabelaComercial.descontoId=null; save(); render(); }
-function comCelula(bruto,bg){
-  const style=bg?bg:'';
+function comCelula(pid,chave,bg,isAdmin){
+  const tc=DB.tabelaComercial; const style=bg?bg:'';
+  const bruto=tc.precos && tc.precos[pid] && tc.precos[pid][chave];
   if(bruto==null) return `<td class="muted" style="text-align:center;${style}">—</td>`;
   const d=descontoAtual();
-  if(d){ return `<td style="text-align:center;${style}"><div style="text-decoration:line-through;font-size:11px;color:var(--muted)">${money(bruto)}</div><b>${money(comLiquido(bruto))}</b></td>`; }
-  return `<td style="text-align:center;font-weight:700;${style}">${money(bruto)}</td>`;
+  const preco = d ? `<div style="text-decoration:line-through;font-size:11px;color:var(--muted)">${money(bruto)}</div><b>${money(comLiquido(bruto))}</b>` : `<b>${money(bruto)}</b>`;
+  let mc=''; if(isAdmin){ const r=comMC(pid,chave); if(r) mc=mcBadge(r.mcPct); }
+  return `<td style="text-align:center;${style}">${preco}${mc}</td>`;
 }
 function viewComercial(){
   const editavel=can('editar');
@@ -2111,6 +2139,7 @@ function viewComercial(){
   if(tc.descontoId && !(DB.descontos||[]).some(d=>d.id===tc.descontoId)) tc.descontoId=null;
   const desc=descontoAtual();
   const importado=!!tc.importadoEm;
+  const isAdmin=!!(SESSION && (SESSION.admin || (currentPerfil()||{}).admin));
   let h=`<div class="card no-print" style="margin-bottom:16px"><div class="bd">
     <div class="row" style="gap:14px;flex-wrap:wrap;align-items:flex-end">
       <div class="field" style="margin:0;min-width:190px"><label>Markup a importar</label><select class="inp" onchange="comSet('markupId',this.value)">${DB.markups.map(m=>`<option value="${m.id}" ${m.id===tc.markupId?'selected':''}>${m.nome}</option>`).join('')}</select></div>
@@ -2127,12 +2156,14 @@ function viewComercial(){
     h+=`<div class="card no-print" style="margin-bottom:16px"><div class="hd"><div><h3>Descontos pré-cadastrados</h3><div class="desc">${(DB.descontos||[]).length} desconto(s)</div></div></div><div class="bd">
       <div class="row" style="gap:10px;flex-wrap:wrap;align-items:flex-end">
         <div class="field" style="margin:0;min-width:200px"><label>Nome</label><input class="inp" id="dscNome" placeholder="ex.: À vista, Atacado"></div>
-        <div class="field" style="margin:0;width:120px"><label>Percentual</label><div class="inp-group"><input class="inp" id="dscPct" placeholder="0,00"><span class="suffix">%</span></div></div>
+        <div class="field" style="margin:0;width:120px"><label>Desconto</label><div class="inp-group"><input class="inp" id="dscPct" placeholder="0,00"><span class="suffix">%</span></div></div>
+        <div class="field" style="margin:0;width:150px"><label>Comissão rep.</label><div class="inp-group"><input class="inp" id="dscCom" placeholder="0,00"><span class="suffix">%</span></div></div>
         <button class="btn primary sm" onclick="descontoSalvar()">💾 Salvar</button>
         <button class="btn sm" onclick="descontoEdit=null;render()">Limpar</button>
       </div>
-      <div style="margin-top:10px;overflow:auto"><table><thead><tr><th>Nome</th><th>Percentual</th><th></th></tr></thead><tbody>
-      ${(DB.descontos||[]).map(d=>`<tr><td><b>${d.nome}</b></td><td>${pct(num(d.percentual))}</td><td style="white-space:nowrap"><button class="btn sm" onclick="descontoEditar('${d.id}')">✎</button> <button class="btn sm danger" onclick="descontoExcluir('${d.id}')">🗑</button></td></tr>`).join('')||`<tr><td colspan="3" class="muted" style="padding:14px">Nenhum desconto cadastrado.</td></tr>`}
+      <div class="hint" style="margin-top:6px">A <b>comissão do representante</b> é usada no cálculo da margem de contribuição quando o desconto é aplicado.</div>
+      <div style="margin-top:10px;overflow:auto"><table><thead><tr><th>Nome</th><th>Desconto</th><th>Comissão rep.</th><th></th></tr></thead><tbody>
+      ${(DB.descontos||[]).map(d=>`<tr><td><b>${d.nome}</b></td><td>${pct(num(d.percentual))}</td><td>${pct(num(d.comissao||0))}</td><td style="white-space:nowrap"><button class="btn sm" onclick="descontoEditar('${d.id}')">✎</button> <button class="btn sm danger" onclick="descontoExcluir('${d.id}')">🗑</button></td></tr>`).join('')||`<tr><td colspan="4" class="muted" style="padding:14px">Nenhum desconto cadastrado.</td></tr>`}
       </tbody></table></div>
     </div></div>`;
   }
@@ -2149,11 +2180,12 @@ function viewComercial(){
     </div></div><div class="bd" style="padding:0;overflow:auto">`;
     if(tecidos.length){
       h+=`<table><thead><tr><th>Tamanho</th>${tecidos.map((t,ci)=>`<th style="text-align:center;background:${tpCor(ci)};-webkit-print-color-adjust:exact;print-color-adjust:exact">Tecido ${t}</th>`).join('')}</tr></thead><tbody>`;
-      tamanhos.forEach(tz=>{ h+=`<tr><td><b>${tz}</b></td>${tecidos.map((tcd,ci)=>comCelula(pmap[comChave(tz,tcd)],`background:${tpCor(ci)};-webkit-print-color-adjust:exact;print-color-adjust:exact`)).join('')}</tr>`; });
+      tamanhos.forEach(tz=>{ h+=`<tr><td><b>${tz}</b></td>${tecidos.map((tcd,ci)=>comCelula(p.id,comChave(tz,tcd),`background:${tpCor(ci)};-webkit-print-color-adjust:exact;print-color-adjust:exact`,isAdmin)).join('')}</tr>`; });
       h+=`</tbody></table>`;
     } else {
-      h+=`<table><thead><tr><th>Medida</th><th>Dimensões</th><th style="text-align:right">Preço</th></tr></thead><tbody>`;
-      p.variacoes.forEach(v=>{ const bruto=pmap[comChave(v.tamanho,v.tecido)]; h+=`<tr><td><b>${v.tamanho}</b></td><td class="muted">${v.medida||'—'}</td><td style="text-align:right">${bruto==null?'—':(desc?`<span style="text-decoration:line-through;font-size:11px;color:var(--muted)">${money(bruto)}</span> <b>${money(comLiquido(bruto))}</b>`:`<b>${money(bruto)}</b>`)}</td></tr>`; });
+      h+=`<table><thead><tr><th>Medida</th><th>Dimensões</th><th style="text-align:right">Preço</th>${isAdmin?'<th style="text-align:right">MC%</th>':''}</tr></thead><tbody>`;
+      p.variacoes.forEach(v=>{ const ch=comChave(v.tamanho,v.tecido); const bruto=pmap[ch]; const mcr=isAdmin?comMC(p.id,ch):null;
+        h+=`<tr><td><b>${v.tamanho}</b></td><td class="muted">${v.medida||'—'}</td><td style="text-align:right">${bruto==null?'—':(desc?`<span style="text-decoration:line-through;font-size:11px;color:var(--muted)">${money(bruto)}</span> <b>${money(comLiquido(bruto))}</b>`:`<b>${money(bruto)}</b>`)}</td>${isAdmin?`<td style="text-align:right">${mcr?mcBadge(mcr.mcPct):'—'}</td>`:''}</tr>`; });
       h+=`</tbody></table>`;
     }
     h+=`</div></div>`;
