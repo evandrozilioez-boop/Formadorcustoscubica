@@ -843,9 +843,10 @@ function setCalcMode(m){ calcMode=m;
   calcRerender(); }
 function initCalc(){ calcRerender(); }
 function findVar(vid){ for(const p of DB.produtos){ const v=p.variacoes.find(x=>x.id===vid); if(v) return {p,v}; } return {}; }
+function margemVarDe(v){ return (v.margemVar!=null && v.margemVar!=='') ? num(v.margemVar) : num(el('calMargem').value); }
 function computeRow(v){
   const base={custo:num(v.custoTotal), taxes:DB.taxes, desp:DB.desp, comissao:num(el('calCom').value)};
-  const sugestao=precificar({...base, margem:num(el('calMargem').value), margemExtra:num(DB.margemExtra)});
+  const sugestao=precificar({...base, margem:margemVarDe(v), margemExtra:num(DB.margemExtra)});
   const manual=num(v.precoManual);
   const usouManual = manual>0;
   const efetivo = usouManual ? margemDoPreco(manual, base) : sugestao;
@@ -955,23 +956,43 @@ function matrixCell(v, editavel){
   const temCusto=num(v.custoTotal)>0;
   const {sugestao,usouManual}=computeRow(v);
   const precoVal = temCusto ? (usouManual?num(v.precoManual):sugestao.preco).toFixed(2) : '';
+  const margVal = margemVarDe(v);
   return `
     <div class="hint" style="text-align:left;margin-bottom:2px">Custo</div>
     <div class="inp-group"><input class="inp" style="padding-left:26px" data-vid="${v.id}" value="${temCusto?num(v.custoTotal).toFixed(2):''}" placeholder="0,00" oninput="onCustoEditM(this)" ${editavel?'':'disabled'}><span class="suffix" style="left:9px;right:auto">R$</span></div>
-    <div class="hint" style="text-align:left;margin:6px 0 2px">Preço sugerido <span class="muted">(editável)</span></div>
+    <div class="hint" style="text-align:left;margin:6px 0 2px">Markup — margem (%) <span class="muted">por variação</span></div>
+    <div class="inp-group"><input class="inp" id="mkp_${v.id}" data-vid="${v.id}" value="${margVal}" placeholder="${num(el('calMargem')?el('calMargem').value:DB.margemAlvo)}" oninput="onMargemEditM(this)" ${editavel?'':'disabled'}><span class="suffix">%</span></div>
+    <div id="brk_${v.id}" style="margin-top:8px"></div>
+    <div class="hint" style="text-align:left;margin:8px 0 2px">Preço sugerido <span class="muted">(editável)</span></div>
     <div class="inp-group"><input class="inp" id="pm_${v.id}" style="padding-left:26px;font-weight:700" data-vid="${v.id}" value="${precoVal}" placeholder="—" oninput="onPrecoEditM(this)" ${editavel&&temCusto?'':'disabled'}><span class="suffix" style="left:9px;right:auto">R$</span></div>
     <div id="mx_${v.id}" class="hint" style="margin-top:4px;text-align:center"></div>`;
 }
 function renderMatrixCell(v){
-  const box=el('mx_'+v.id); if(!box) return;
+  const box=el('mx_'+v.id), brk=el('brk_'+v.id); if(!box) return;
   const pm=el('pm_'+v.id);
-  if(num(v.custoTotal)<=0){ box.innerHTML='<span class="muted">informe o custo</span>'; if(pm&&document.activeElement!==pm) pm.value=''; return; }
+  if(num(v.custoTotal)<=0){ box.innerHTML='<span class="muted">informe o custo</span>'; if(brk) brk.innerHTML=''; if(pm&&document.activeElement!==pm) pm.value=''; return; }
   const {sugestao,efetivo,usouManual}=computeRow(v);
   const st=margemStatus(efetivo.mcPct);
   // se o preço não foi alterado manualmente, o campo acompanha o sugerido
   if(pm && !usouManual && document.activeElement!==pm) pm.value=sugestao.preco.toFixed(2);
   if(pm) pm.style.borderColor = usouManual? st.hex : 'var(--border)';
-  box.innerHTML=`margem <b style="color:${st.hex}">${pct(efetivo.mcPct)}</b>`
+  // Cálculo do markup, um abaixo do outro (soma = preço sugerido)
+  if(brk){
+    const s=sugestao;
+    const somaImp=Object.values(DB.taxes).reduce((a,b)=>a+num(b),0);
+    const somaDesp=Object.values(DB.desp).reduce((a,b)=>a+num(b),0);
+    const L=(l,val,p)=>`<div class="brk"><span class="k">${l}${p!=null?` <span style="opacity:.6">${pct(p)}</span>`:''}</span><span class="v">${money(val)}</span></div>`;
+    brk.innerHTML=`<div class="card" style="background:var(--surface-2)"><div class="bd" style="padding:8px 10px">
+      ${L('Custo', s.custo)}
+      ${L('+ Impostos', s.impostosTotal, somaImp)}
+      ${L('+ Despesas', s.despesasTotal, somaDesp)}
+      ${L('+ Comissão', s.comissaoRs, num(el('calCom').value))}
+      ${L('+ Margem contrib.', s.mc, s.mcPct)}
+      ${num(DB.margemExtra)>0?`<div class="brk"><span class="k">(inclui margem extra ${pct(num(DB.margemExtra))})</span><span class="v"></span></div>`:''}
+      <div class="brk total" style="margin-top:4px"><span class="k">= Preço sugerido</span><span class="v">${money(s.preco)}</span></div>
+    </div></div>`;
+  }
+  box.innerHTML=`margem resultante <b style="color:${st.hex}">${pct(efetivo.mcPct)}</b>`
     + (usouManual?` · <span style="cursor:pointer;color:var(--primary)" onclick="usarSugeridoM('${v.id}')">↺ sugerido</span>`:'');
 }
 function onCustoEditM(inpEl){
@@ -981,6 +1002,12 @@ function onCustoEditM(inpEl){
 function onPrecoEditM(inpEl){
   const {v}=findVar(inpEl.dataset.vid); if(!v) return;
   v.precoManual = inpEl.value.trim()===''?0:num(inpEl.value);
+  save(); renderMatrixCell(v);
+}
+function onMargemEditM(inpEl){
+  const {v}=findVar(inpEl.dataset.vid); if(!v) return;
+  v.margemVar = inpEl.value.trim()===''?'':num(inpEl.value); // vazio = usa a margem geral
+  v.precoManual=0; // ao definir o markup, o preço passa a ser o sugerido por ele
   save(); renderMatrixCell(v);
 }
 function usarSugeridoM(vid){
