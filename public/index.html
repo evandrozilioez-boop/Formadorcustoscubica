@@ -293,7 +293,9 @@ function ensureDBDefaults(){
   DB.perfis=DB.perfis||defaultPerfis();
   DB.usuarios=DB.usuarios||defaultUsuarios();
   DB.perfis.forEach(pf=>{ if(!pf.admin && !DB.menuPerms[pf.key]) DB.menuPerms[pf.key]=baseMenuPerms(); if(!pf.admin && DB.menuPerms[pf.key].tabelapreco===undefined) DB.menuPerms[pf.key].tabelapreco=true; if(!pf.admin && DB.menuPerms[pf.key].frete===undefined) DB.menuPerms[pf.key].frete=(pf.key==='gestor'); });
-  DB.tabelasPreco=DB.tabelasPreco||[];
+  DB.tabelasPreco=Array.isArray(DB.tabelasPreco)?DB.tabelasPreco:[];
+  if(!DB.tabelasPreco.length) DB.tabelasPreco=[{id:uid(),nome:'Geral',dados:{}}];
+  DB.tabelasPreco.forEach(t=>{ if(!t.dados) t.dados={}; });
   DB.fretes=DB.fretes||[{id:uid(),nome:'FOB (sem frete)',tipo:'FOB',percentual:0}];
   // Markups: migra a config atual para um markup "Padrão" (permite cadastrar vários)
   if(!DB.markups || !DB.markups.length){
@@ -308,12 +310,21 @@ function ensureDBDefaults(){
   DB.descontos.forEach(d=>{ if(d.comissao==null) d.comissao=0; });
   DB.tabelaComercial=DB.tabelaComercial||{markupId:null,freteId:null,importadoEm:null,descontoId:null,precos:{},custos:{},meta:{},impostosPct:0,despesasPct:0,fretePct:0};
   DB.tabelaComercial.meta=DB.tabelaComercial.meta||{};
-  DB.precosTabela=DB.precosTabela||{}; // preços definidos enviados da Precificação para a Tabela de Preço
+  DB.precosTabela=DB.precosTabela||{};
+  // migra o formato anterior (uma tabela única) para a 1ª tabela nomeada
+  if(DB.precosTabela && !Array.isArray(DB.precosTabela) && Object.keys(DB.precosTabela).length){
+    Object.assign(DB.tabelasPreco[0].dados, DB.precosTabela); DB.precosTabela={};
+  }
 }
 /* ---------- Markups (composições de impostos/despesas/comissão/margem) ---------- */
 function markupAtivoObj(){ return DB.markups.find(m=>m.id===DB.markupAtivo)||DB.markups[0]; }
 function markupAplicar(mk){ DB.taxes={...mk.taxes}; DB.desp={...mk.desp}; DB.comissao=mk.comissao; DB.margemAlvo=mk.margemAlvo; DB.margemMin=mk.margemMin; DB.margemExtra=num(mk.margemExtra); }
-function markupAtivar(id){ DB.markupAtivo=id; markupAplicar(markupAtivoObj()); save(); render(); }
+function markupAtivar(id){
+  const margAntes=DB.margemAlvo, minAntes=DB.margemMin; // preserva a margem de contribuição já definida
+  DB.markupAtivo=id; markupAplicar(markupAtivoObj());
+  DB.margemAlvo=margAntes; DB.margemMin=minAntes; // trocar de markup NÃO altera a margem digitada (só impostos/despesas/comissão)
+  save(); render();
+}
 function markupNovo(){ const nome=prompt('Nome do novo markup (ex.: Marketplace, Atacado):',''); if(nome===null) return; const base=markupAtivoObj(); const mk={id:uid(),nome:(nome.trim()||('Markup '+(DB.markups.length+1))),taxes:{...base.taxes},desp:{...base.desp},comissao:base.comissao,margemAlvo:base.margemAlvo,margemMin:base.margemMin,margemExtra:num(base.margemExtra)}; DB.markups.push(mk); DB.markupAtivo=mk.id; markupAplicar(mk); save(); render(); }
 function markupRenomear(){ const mk=markupAtivoObj(); const nome=prompt('Renomear markup:',mk.nome); if(nome===null) return; mk.nome=nome.trim()||mk.nome; save(); render(); }
 function markupExcluir(){ if(DB.markups.length<=1){ alert('Deve existir ao menos um markup.'); return; } const mk=markupAtivoObj(); if(!confirm('Excluir o markup "'+mk.nome+'"?')) return; DB.markups=DB.markups.filter(m=>m.id!==mk.id); DB.markupAtivo=DB.markups[0].id; markupAplicar(markupAtivoObj()); save(); render(); }
@@ -821,6 +832,8 @@ function viewCalc(){
           <option value="__all">Todos os produtos</option>
           ${DB.produtos.map(p=>`<option value="${p.id}">${p.modelo} (${p.familia})</option>`).join('')}
         </select></div>
+      <div class="field" style="margin:0;min-width:170px"><label>Enviar para a tabela</label>
+        <select class="inp" id="calcDestino">${DB.tabelasPreco.map(t=>`<option value="${t.id}">${t.nome}</option>`).join('')}</select></div>
     </div>
   </div></div>
   <div class="row" style="justify-content:space-between;margin-bottom:6px;align-items:center;gap:10px;flex-wrap:wrap">
@@ -1020,16 +1033,19 @@ function usarSugeridoM(vid){
 }
 // Preço efetivo de uma variação: o que você digitou (manual) ou o sugerido pela margem.
 function precoEfetivo(v){ if(num(v.precoManual)>0) return num(v.precoManual); if(num(v.custoTotal)<=0) return 0; return computeRow(v).sugestao.preco; }
-// Envia os preços definidos de um MODELO para a Tabela de Preço (congela com o markup já aplicado).
+// Envia os preços definidos de um MODELO para a Tabela de Preço ESCOLHIDA (congela com o markup já aplicado).
 function calcEnviarTabela(pid){
   const p=DB.produtos.find(x=>x.id===pid); if(!p) return;
+  const destId = el('calcDestino') ? el('calcDestino').value : (DB.tabelasPreco[0]&&DB.tabelasPreco[0].id);
+  const tab = DB.tabelasPreco.find(t=>t.id===destId) || DB.tabelasPreco[0];
+  if(!tab){ alert('Crie uma tabela de preço primeiro (aba Tabela de Preço).'); return; }
   const map={}; let n=0;
   p.variacoes.forEach(v=>{ const preco=precoEfetivo(v); if(preco>0){ map[comChave(v.tamanho,v.tecido)]=Math.round(preco*100)/100; n++; } });
   if(!n){ alert('Informe o custo (ou digite o preço) das variações antes de enviar.'); return; }
-  DB.precosTabela=DB.precosTabela||{};
-  DB.precosTabela[pid]={ precos:map, enviadoEm:new Date().toISOString() };
+  tab.dados=tab.dados||{};
+  tab.dados[pid]={ precos:map, enviadoEm:new Date().toISOString() };
   save();
-  alert('Preços do modelo "'+p.modelo+'" enviados para a Tabela de Preço ('+n+' variação(ões)).');
+  alert('Preços de "'+p.modelo+'" enviados para a tabela "'+tab.nome+'" ('+n+' variação(ões)).');
 }
 
 /* ----- MODO LISTA: detalhado com preço de venda manual e as duas margens ----- */
@@ -2052,8 +2068,9 @@ function baixarXlsx(aoa, nomeArq, nomePlan){
   });
 }
 function tabelaPrecoAOA(){
+  const tab=tpTabelaAtual();
   const fr=freteById(tpCfg&&tpCfg.freteId); const freteLbl=fr?`${fr.nome} (${fr.tipo} ${pct(num(fr.percentual))})`:'sem frete';
-  const aoa=[[`Tabela de Preço — ${DB.empresa}`],[`Frete: ${freteLbl} · ${new Date().toLocaleDateString('pt-BR')}`],[]];
+  const aoa=[[`Tabela de Preço — ${tab?tab.nome:''} — ${DB.empresa}`],[`Frete: ${freteLbl} · ${new Date().toLocaleDateString('pt-BR')}`],[]];
   DB.produtos.forEach(p=>{
     if(!tpEnviado(p.id)) return; // só modelos enviados
     const tamanhos=[...new Set(p.variacoes.map(v=>v.tamanho))];
@@ -2070,7 +2087,7 @@ function tabelaPrecoAOA(){
   });
   return aoa;
 }
-function exportTabelaPrecoXlsx(){ if(!DB.produtos.length){ alert('Cadastre produtos para exportar.'); return; } baixarXlsx(tabelaPrecoAOA(), `tabela-preco-${new Date().toISOString().slice(0,10)}.xlsx`, 'Tabela de Preço'); }
+function exportTabelaPrecoXlsx(){ if(!DB.produtos.length){ alert('Cadastre produtos para exportar.'); return; } const tab=tpTabelaAtual(); const nm=(tab?tab.nome:'tabela').replace(/[^\w\-]+/g,'-').toLowerCase(); baixarXlsx(tabelaPrecoAOA(), `tabela-preco-${nm}-${new Date().toISOString().slice(0,10)}.xlsx`, (tab?tab.nome:'Tabela').slice(0,31)); }
 function tabelaComercialAOA(){
   const tc=DB.tabelaComercial; const desc=descontoAtual();
   const aoa=[[`Tabela Comercial — ${DB.empresa}`],[`${desc?`Desconto: ${desc.nome} (${pct(num(desc.percentual))})`:'Sem desconto'} · ${new Date().toLocaleDateString('pt-BR')}`],[]];
@@ -2092,23 +2109,31 @@ function tabelaComercialAOA(){
 }
 function exportComercialXlsx(){ if(!DB.tabelaComercial.importadoEm){ alert('Importe os preços antes de exportar.'); return; } baixarXlsx(tabelaComercialAOA(), `tabela-comercial-${new Date().toISOString().slice(0,10)}.xlsx`, 'Tabela Comercial'); }
 // Preço na Tabela = preço definido (enviado da Precificação) + frete opcional por cima.
-function tpEnviado(pid){ return DB.precosTabela && DB.precosTabela[pid]; }
+function tpTabelaAtual(){ return DB.tabelasPreco.find(t=>t.id===(tpCfg&&tpCfg.tabelaId)) || DB.tabelasPreco[0]; }
+function tpEnviado(pid){ const t=tpTabelaAtual(); return t && t.dados && t.dados[pid]; }
 function tpPreco(pid, v){ const d=tpEnviado(pid); if(!d||!d.precos) return null; const b=d.precos[comChave(v.tamanho,v.tecido)]; if(b==null) return null; const f=fretePct(tpCfg&&tpCfg.freteId); return f>0? b*(1+f/100): b; }
+function tpNovaTabela(){ const nome=prompt('Nome da nova tabela de preço (ex.: Geral, Exportação, Atacado):',''); if(nome===null) return; const t={id:uid(),nome:(nome.trim()||('Tabela '+(DB.tabelasPreco.length+1))),dados:{}}; DB.tabelasPreco.push(t); tpCfg.tabelaId=t.id; save(); render(); }
+function tpRenomearTabela(){ const t=tpTabelaAtual(); if(!t) return; const nome=prompt('Renomear a tabela:',t.nome); if(nome===null) return; t.nome=nome.trim()||t.nome; save(); render(); }
+function tpExcluirTabela(){ if(DB.tabelasPreco.length<=1){ alert('Deve existir ao menos uma tabela de preço.'); return; } const t=tpTabelaAtual(); if(!confirm('Excluir a tabela "'+t.nome+'"? Os preços gravados nela serão perdidos.')) return; DB.tabelasPreco=DB.tabelasPreco.filter(x=>x.id!==t.id); tpCfg.tabelaId=DB.tabelasPreco[0].id; save(); render(); }
 function viewTabelaPreco(){
-  if(!tpCfg) tpCfg={freteId:''};
+  if(!tpCfg) tpCfg={freteId:'',tabelaId:(DB.tabelasPreco[0]&&DB.tabelasPreco[0].id)};
+  if(!DB.tabelasPreco.some(t=>t.id===tpCfg.tabelaId)) tpCfg.tabelaId=DB.tabelasPreco[0].id;
   if(tpCfg.freteId && !freteById(tpCfg.freteId)) tpCfg.freteId='';
   const editavel=can('editar');
+  const tabAtual=tpTabelaAtual();
   const fr=freteById(tpCfg.freteId); const freteLbl=fr?`${fr.nome} (${fr.tipo} ${pct(num(fr.percentual))})`:'sem frete';
   let h=`<div class="sticky-head">
   <div class="card no-print" style="margin-bottom:8px"><div class="bd" style="padding:10px 14px">
     <div class="row" style="gap:12px;flex-wrap:wrap;align-items:flex-end">
-      <div class="field" style="margin:0;min-width:220px"><label>Frete (opcional, sobre o preço)</label><select class="inp" onchange="tpSet('freteId',this.value)"><option value="">— sem frete —</option>${DB.fretes.map(f=>`<option value="${f.id}" ${f.id===tpCfg.freteId?'selected':''}>${f.nome} · ${f.tipo} ${pct(num(f.percentual))}</option>`).join('')}</select></div>
+      <div class="field" style="margin:0;min-width:200px"><label>Tabela de preço</label><select class="inp" onchange="tpSet('tabelaId',this.value)">${DB.tabelasPreco.map(t=>`<option value="${t.id}" ${t.id===tpCfg.tabelaId?'selected':''}>${t.nome}</option>`).join('')}</select></div>
+      ${editavel?`<button class="btn sm" onclick="tpNovaTabela()">＋ Nova</button><button class="btn sm" onclick="tpRenomearTabela()">✎ Renomear</button><button class="btn sm danger" onclick="tpExcluirTabela()">🗑</button>`:''}
+      <div class="field" style="margin:0;min-width:200px"><label>Frete (opcional, sobre o preço)</label><select class="inp" onchange="tpSet('freteId',this.value)"><option value="">— sem frete —</option>${DB.fretes.map(f=>`<option value="${f.id}" ${f.id===tpCfg.freteId?'selected':''}>${f.nome} · ${f.tipo} ${pct(num(f.percentual))}</option>`).join('')}</select></div>
       <button class="btn sm" onclick="exportTabelaPrecoXlsx()">⬇ Excel</button>
       <button class="btn sm" onclick="window.print()">🖨 Imprimir</button>
-      <span class="hint">Os preços vêm da <b>Precificação</b> (já com markup). Envie cada modelo pelo botão <b>“⤴ Enviar para Tabela de Preço”</b>.</span>
+      <span class="hint">Tabela <b>${tabAtual?tabAtual.nome:''}</b> · os preços vêm da <b>Precificação</b> (já com markup), escolhendo esta tabela como destino.</span>
     </div>
   </div></div>
-  <div class="print-only" style="margin-bottom:10px"><h2 style="font-size:16px">Tabela de Preço — ${DB.empresa}</h2><div class="muted">Frete: ${freteLbl} · ${new Date().toLocaleDateString('pt-BR')}</div></div>
+  <div class="print-only" style="margin-bottom:10px"><h2 style="font-size:16px">Tabela de Preço — ${tabAtual?tabAtual.nome:''} — ${DB.empresa}</h2><div class="muted">Frete: ${freteLbl} · ${new Date().toLocaleDateString('pt-BR')}</div></div>
   </div>`;
   if(!DB.produtos.length){ return h+`<div class="card"><div class="bd muted" style="padding:24px">Cadastre produtos e envie os preços pela Precificação.</div></div>`; }
   DB.produtos.forEach(p=>{
