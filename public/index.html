@@ -186,21 +186,21 @@ tbody tr:hover{background:var(--surface-2)}
   html.print-eng .eng-block .bd{padding:0!important}
 
   /* ===== Impressão do bloco MADEIRA: retrato, fonte maior, só as colunas essenciais ===== */
-  html.print-madeira .eng-block .no-print{display:none!important}
-  html.print-madeira .col-mat,html.print-madeira .col-un,html.print-madeira .col-m2{display:none!important}
-  html.print-madeira .eng-block table{width:100%;table-layout:auto;font-size:14px;border-collapse:collapse}
-  html.print-madeira .eng-block th,html.print-madeira .eng-block td{padding:6px 8px!important;white-space:normal;line-height:1.3}
-  html.print-madeira .eng-block input,html.print-madeira .eng-block select{font-size:14px!important;width:100%!important;line-height:1.3}
-  html.print-madeira .eng-block h3{font-size:16px!important;margin:0}
-  html.print-madeira .eng-block .hd{padding:6px 10px!important}
-  html.print-madeira .eng-block .bd{padding:0!important}
+  html.print-vert .eng-block .no-print{display:none!important}
+  html.print-vert .col-mat,html.print-vert .col-un,html.print-vert .col-m2{display:none!important}
+  html.print-vert .eng-block table{width:100%;table-layout:auto;font-size:14px;border-collapse:collapse}
+  html.print-vert .eng-block th,html.print-vert .eng-block td{padding:6px 8px!important;white-space:normal;line-height:1.3}
+  html.print-vert .eng-block input,html.print-vert .eng-block select{font-size:14px!important;width:100%!important;line-height:1.3}
+  html.print-vert .eng-block h3{font-size:16px!important;margin:0}
+  html.print-vert .eng-block .hd{padding:6px 10px!important}
+  html.print-vert .eng-block .bd{padding:0!important}
 }
 /* Paisagem só quando imprimindo a Engenharia (não afeta os outros relatórios) */
 @page engpage{size:A4 landscape;margin:8mm}
 html.print-eng body{page:engpage}
 /* Bloco Madeira: retrato */
 @page madpage{size:A4 portrait;margin:12mm}
-html.print-madeira body{page:madpage}
+html.print-vert body{page:madpage}
 .app-footer{margin-top:auto;padding:14px 26px;border-top:1px solid var(--border);color:var(--muted);font-size:11.5px;text-align:center;letter-spacing:.2px}
 @media(max-width:760px){.app-footer{padding:12px 14px;font-size:10.5px}}
 </style>
@@ -1436,7 +1436,7 @@ function engCellFor(eng,blk,r,i,c,editavel){
   if(c[0]==='total' && key==='ziper') return `<td class="eng-tot" id="engttl_${key}_${i}" style="font-weight:700" title="Cursor: só quantidade · demais: Quant. × Comp.">${fmtQtd(ziperTotal(r))}</td>`;
   if(c[0]==='tipo' && key==='ziper') return `<td><select class="inp" onchange="onEngEdit('ziper',${i},'tipo',this)" ${editavel?'':'disabled'}>${['Zíper','Cursor','Velcro'].map(o=>`<option ${((r.tipo||'Zíper')===o)?'selected':''}>${o}</option>`).join('')}</select></td>`;
   if(c[0]==='m2' && key==='madeira') return `<td class="eng-tot col-m2" id="engm2_${key}_${i}" style="font-weight:700" title="Compr. × Larg. × Espessura × Quant.">${fmtQtd(num(r.compr)*num(r.larg)*num(r.esp)*num(r.quant1))}</td>`;
-  if(c[0]==='m2' && key==='espumas') return `<td class="eng-tot" id="engm2_${key}_${i}" style="font-weight:700" title="Compr. × Larg. × Espessura × Quant.">${fmtQtd(num(r.compr)*num(r.larg)*num(r.esp)*num(r.quant))}</td>`;
+  if(c[0]==='m2' && key==='espumas') return `<td class="eng-tot col-m2" id="engm2_${key}_${i}" style="font-weight:700" title="Compr. × Larg. × Espessura × Quant.">${fmtQtd(num(r.compr)*num(r.larg)*num(r.esp)*num(r.quant))}</td>`;
   if(c[0]==='m2' && (key==='fibraManta'||key==='mantaExpandida')) return `<td class="eng-tot" id="engm2_${key}_${i}" style="font-weight:700" title="Compr. × Larg. × Quant.">${fmtQtd(num(r.comp)*num(r.larg)*num(r.quant))}</td>`;
   if(c[0]==='m2' && key==='tnt') return `<td class="eng-tot" id="engm2_tnt_${i}" style="font-weight:700" title="Qtd. (ploter) × Largura">${fmtQtd(num(r.qtdPloter)*num(r.larg))}</td>`;
   if(c[0]==='pesoTotal' && key==='fibraSilic') return `<td class="eng-tot" id="engps_${key}_${i}" style="font-weight:700" title="Soma das almofadas">${fmtQtd(fibraSilicSoma(r))}</td>`;
@@ -1834,7 +1834,7 @@ function parseEngSheet(M, fname){
 function engSyncSkip(){ document.querySelectorAll('.engchk').forEach(c=>{ const b=el('engblock_'+c.dataset.key); if(b) b.classList.toggle('skip-print', !c.checked); }); }
 function engPrintSelecionados(){ if(!document.querySelector('.engchk:checked')){ alert('Selecione ao menos um bloco.'); return; } engSyncSkip(); document.documentElement.classList.add('print-eng'); window.print(); }
 function engPrintTodos(){ document.querySelectorAll('.eng-block').forEach(b=>b.classList.remove('skip-print')); document.documentElement.classList.add('print-eng'); window.print(); }
-function engPrintBloco(key){ document.querySelectorAll('.eng-block').forEach(b=>b.classList.toggle('skip-print', b.id!=='engblock_'+key)); document.documentElement.classList.add(key==='madeira'?'print-madeira':'print-eng'); window.print(); }
+function engPrintBloco(key){ document.querySelectorAll('.eng-block').forEach(b=>b.classList.toggle('skip-print', b.id!=='engblock_'+key)); document.documentElement.classList.add((key==='madeira'||key==='espumas')?'print-vert':'print-eng'); window.print(); }
 
 /* ============================================================
    PRODUTOS
@@ -2643,7 +2643,7 @@ function toggleTheme(){
 }
 document.getElementById('nav').addEventListener('click',e=>{const b=e.target.closest('button[data-view]');if(b)nav(b.dataset.view);});
 el('lgPass').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
-window.addEventListener('afterprint',()=>{document.querySelectorAll('.eng-block').forEach(b=>b.classList.remove('skip-print'));document.documentElement.classList.remove('print-eng','print-madeira');});
+window.addEventListener('afterprint',()=>{document.querySelectorAll('.eng-block').forEach(b=>b.classList.remove('skip-print'));document.documentElement.classList.remove('print-eng','print-vert');});
 // Conecta automaticamente ao servidor, se já configurado
 cloudAutoStart();
 </script>
