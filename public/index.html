@@ -176,13 +176,13 @@ tbody tr:hover{background:var(--surface-2)}
   .eng-sticky,.sticky-head{position:static!important;background:transparent!important}
   input,select{border:none!important;background:transparent!important;padding:0!important;-webkit-appearance:none;appearance:none}
 
-  /* ===== Impressão da Engenharia: compacta e em paisagem para caber tudo ===== */
-  html.print-eng .eng-block table{width:100%;table-layout:fixed;font-size:8px;border-collapse:collapse}
-  html.print-eng .eng-block th,html.print-eng .eng-block td{padding:1.5px 3px!important;min-width:0!important;white-space:normal;word-break:break-word;overflow:hidden;line-height:1.15}
-  html.print-eng .eng-block input,html.print-eng .eng-block select{font-size:8px!important;width:100%!important;min-width:0!important;line-height:1.15}
-  html.print-eng .eng-block h3{font-size:10.5px!important;margin:0}
-  html.print-eng .eng-block .desc,html.print-eng .eng-block .hint{font-size:7.5px!important}
-  html.print-eng .eng-block .hd{padding:4px 8px!important}
+  /* ===== Impressão da Engenharia: retrato, fonte maior, ajustando à página ===== */
+  html.print-eng .eng-block table{width:100%;table-layout:fixed;font-size:11px;border-collapse:collapse}
+  html.print-eng .eng-block th,html.print-eng .eng-block td{padding:3px 5px!important;min-width:0!important;white-space:normal;word-break:break-word;overflow:hidden;line-height:1.25}
+  html.print-eng .eng-block input,html.print-eng .eng-block select{font-size:11px!important;width:100%!important;min-width:0!important;line-height:1.25}
+  html.print-eng .eng-block h3{font-size:14px!important;margin:0}
+  html.print-eng .eng-block .desc,html.print-eng .eng-block .hint{font-size:9.5px!important}
+  html.print-eng .eng-block .hd{padding:5px 9px!important}
   html.print-eng .eng-block .bd{padding:0!important}
 
   /* ===== Impressão do bloco MADEIRA: retrato, fonte maior, só as colunas essenciais ===== */
@@ -195,8 +195,8 @@ tbody tr:hover{background:var(--surface-2)}
   html.print-vert .eng-block .hd{padding:6px 10px!important}
   html.print-vert .eng-block .bd{padding:0!important}
 }
-/* Paisagem só quando imprimindo a Engenharia (não afeta os outros relatórios) */
-@page engpage{size:A4 landscape;margin:8mm}
+/* Engenharia em retrato (não afeta os outros relatórios) */
+@page engpage{size:A4 portrait;margin:10mm}
 html.print-eng body{page:engpage}
 /* Bloco Madeira: retrato */
 @page madpage{size:A4 portrait;margin:12mm}
