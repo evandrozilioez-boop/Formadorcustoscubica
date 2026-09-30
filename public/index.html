@@ -1861,6 +1861,7 @@ function produtoCard(p){
       <div class="desc">SKU ${p.codigo} · ${p.categoria} · ${p.variacoes.length} variações</div></div>
     </div>
     <div class="row" style="gap:8px">
+      ${can('editar')?`<button class="btn sm" onclick="openEditarProduto('${p.id}')">✎ Editar</button>`:''}
       ${can('editar')?`<label class="btn sm" style="cursor:pointer">${p.imagem?'🖼 Trocar':'📷 Imagem'}<input type="file" accept="image/*" style="display:none" onchange="onProdImg('${p.id}',this)"></label>`:''}
       ${can('editar')?`<button class="btn sm danger" onclick="excluirProduto('${p.id}')">🗑</button>`:''}
     </div></div>
@@ -1884,30 +1885,72 @@ function excluirProduto(pid){
   save(); render();
 }
 
-/* ---------- Formulário: novo produto ---------- */
+/* ---------- Formulário: novo produto / editar produto ---------- */
 let NP=null;
 function openNovoProduto(){
-  NP={familia:'Sofás', sku:'', nome:'', cat:'', tamanhos:[], tecidos:['A','B','C','D']};
+  NP={editId:null, familia:'Sofás', sku:'', nome:'', cat:'', tamanhos:[], tecidos:['A','B','C','D'], orig:{tamanhos:[], tecidos:[null,null,null,null]}};
+  renderModal();
+}
+/* Edição: NP.orig[field][i] guarda o valor original de cada chip (null = chip novo),
+   para renomear tamanhos/tecidos preservando custos, preços e fichas de engenharia. */
+function openEditarProduto(pid){
+  if(!can('editar')) return;
+  const p=DB.produtos.find(x=>x.id===pid); if(!p) return;
+  const isSofa=p.familia==='Sofás';
+  const tamanhos=[...new Set(p.variacoes.map(v=>v.tamanho))];
+  const tecidos=isSofa?[...new Set(p.variacoes.map(v=>v.tecido).filter(t=>t&&t!=='—'))]:[];
+  NP={editId:pid, familia:p.familia, sku:p.codigo||'', nome:p.modelo||'', cat:(p.categoria&&p.categoria!=='—')?p.categoria:'', imagem:p.imagem||'',
+    tamanhos:[...tamanhos], tecidos:[...tecidos], orig:{tamanhos:[...tamanhos], tecidos:[...tecidos]}};
   renderModal();
 }
 function closeModal(){ el('modalRoot').innerHTML=''; NP=null; }
 function npAddChip(field, inputId){
   const inp=el(inputId); const val=inp.value.trim();
   if(!val) return;
-  if(!NP[field].includes(val)) NP[field].push(val);
+  if(!NP[field].includes(val)){ NP[field].push(val); NP.orig[field].push(null); }
   renderModal();
   setTimeout(()=>{const f=el(inputId); if(f) f.focus();},0);
 }
-function npRemoveChip(field, i){ NP[field].splice(i,1); renderModal(); }
+function npRemoveChip(field, i){ NP[field].splice(i,1); NP.orig[field].splice(i,1); renderModal(); }
+function npRenameChip(field, i){
+  const atual=NP[field][i];
+  const r=prompt('Novo nome:', atual); if(r==null) return;
+  const val=String(r).trim(); if(!val || val===atual) return;
+  if(NP[field].includes(val)){ alert(`"${val}" já está na lista.`); return; }
+  NP[field][i]=val; renderModal();
+}
 function chipList(field){
-  return NP[field].map((t,i)=>`<span class="chip-x">${t}<b onclick="npRemoveChip('${field}',${i})">✕</b></span>`).join('') || '<span class="muted" style="font-size:12px">nenhum adicionado</span>';
+  return NP[field].map((t,i)=>`<span class="chip-x"><span style="cursor:pointer" title="Clique para renomear" onclick="npRenameChip('${field}',${i})">${t}</span><b onclick="npRemoveChip('${field}',${i})">✕</b></span>`).join('') || '<span class="muted" style="font-size:12px">nenhum adicionado</span>';
 }
 function nVariacoes(){ return NP.tamanhos.length * (NP.familia==='Sofás'? Math.max(NP.tecidos.length,1) : 1); }
 function npImagem(input){ const f=input.files[0]; if(!f) return; readImageResized(f,500,d=>{ NP.imagem=d; renderModal(); }); }
+function novaVariacao(isSofa,tz,tc){
+  const custo={espuma:0,madeira:0,molas:0,ferragens:0,tecido:0,pes:0,embalagem:0,cola:0,grampos:0,plasticos:0,maoObra:0,energia:0,outros:0,freteInd:0};
+  return isSofa? {id:uid(),rotulo:`${tz} · Classe ${tc}`,tamanho:tz,tecido:tc,custo,custoTotal:0}
+               : {id:uid(),rotulo:tz,tamanho:tz,tecido:'—',medida:tz,custo,custoTotal:0};
+}
+/* Plano da edição: quais variações são mantidas (com novo tamanho/tecido), criadas e removidas. Não altera nada. */
+function npPlano(p){
+  const isSofa=NP.familia==='Sofás';
+  const tecs=isSofa ? (NP.tecidos.length? NP.tecidos.map((t,i)=>({novo:t,orig:NP.orig.tecidos[i]})) : [{novo:'Única',orig:'Única'}])
+                    : [{novo:'—',orig:'—'}];
+  const byKey=new Map(p.variacoes.map(v=>[comChave(v.tamanho,v.tecido),v]));
+  const usados=new Set(); const itens=[];
+  NP.tamanhos.forEach((tz,i)=>{ const oTz=NP.orig.tamanhos[i];
+    tecs.forEach(t=>{
+      const v=(oTz!=null && t.orig!=null)? byKey.get(comChave(oTz,t.orig)) : null;
+      if(v && !usados.has(v.id)){ usados.add(v.id); itens.push({v,tz,tc:t.novo}); }
+      else itens.push({v:null,tz,tc:t.novo});
+    });
+  });
+  return {isSofa, itens, removidas:p.variacoes.filter(v=>!usados.has(v.id)), novas:itens.filter(x=>!x.v).length};
+}
 function renderModal(){
   const isSofa = NP.familia==='Sofás';
+  const edit = NP.editId? DB.produtos.find(x=>x.id===NP.editId) : null;
+  const plano = edit? npPlano(edit) : null;
   el('modalRoot').innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
-    <div class="modal-hd"><div><h3>Novo produto</h3><div class="desc muted" style="font-size:12px">As variações são geradas automaticamente por tamanho${isSofa?' × classe de tecido':''}</div></div>
+    <div class="modal-hd"><div><h3>${edit?'Editar produto':'Novo produto'}</h3><div class="desc muted" style="font-size:12px">${edit?'Clique no nome de um tamanho ou tecido para renomeá-lo':`As variações são geradas automaticamente por tamanho${isSofa?' × classe de tecido':''}`}</div></div>
       <button class="btn sm" onclick="closeModal()">✕</button></div>
     <div class="modal-bd">
       <div class="grid g-2">
@@ -1938,29 +1981,83 @@ function renderModal(){
           <button class="btn" onclick="npAddChip('tecidos','npTecInp')">＋ Adicionar</button></div></div>`:''}
 
       <div class="card" style="background:var(--surface-2);margin-top:6px"><div class="bd" style="padding:12px 16px">
-        <b>${nVariacoes()}</b> variações serão criadas ${isSofa?`(${NP.tamanhos.length} tamanhos × ${NP.tecidos.length} tecidos)`:''}. O custo de cada uma é preenchido na tela <b>Precificação</b>.</div></div>
+        ${plano
+          ? `<b>${nVariacoes()}</b> variações após salvar: <b>${plano.itens.length-plano.novas}</b> mantidas (custo e preço preservados), <b>${plano.novas}</b> novas${plano.removidas.length?`, <b style="color:var(--red)">${plano.removidas.length} removidas</b>`:''}.`
+          : `<b>${nVariacoes()}</b> variações serão criadas ${isSofa?`(${NP.tamanhos.length} tamanhos × ${NP.tecidos.length} tecidos)`:''}. O custo de cada uma é preenchido na tela <b>Precificação</b>.`}</div></div>
     </div>
     <div class="modal-ft"><button class="btn" onclick="closeModal()">Cancelar</button>
-      <button class="btn primary" onclick="salvarProduto()">Salvar produto</button></div>
+      <button class="btn primary" onclick="salvarProduto()">${edit?'Salvar alterações':'Salvar produto'}</button></div>
   </div></div>`;
 }
 function salvarProduto(){
   if(!NP.sku.trim()||!NP.nome.trim()){ alert('Informe SKU e Nome.'); return; }
   if(!NP.tamanhos.length){ alert('Adicione ao menos um tamanho/medida.'); return; }
+  if(NP.editId) return salvarEdicaoProduto();
   const isSofa=NP.familia==='Sofás';
-  const emptyCost=()=>({espuma:0,madeira:0,molas:0,ferragens:0,tecido:0,pes:0,embalagem:0,cola:0,grampos:0,plasticos:0,maoObra:0,energia:0,outros:0,freteInd:0});
   const prod={id:uid(),familia:NP.familia,modelo:NP.nome.trim(),codigo:NP.sku.trim(),categoria:NP.cat.trim()||'—',imagem:NP.imagem||'',variacoes:[]};
   NP.tamanhos.forEach(tz=>{
-    if(isSofa){
-      (NP.tecidos.length?NP.tecidos:['Única']).forEach(tc=>{
-        prod.variacoes.push({id:uid(),rotulo:`${tz} · Classe ${tc}`,tamanho:tz,tecido:tc,custo:emptyCost(),custoTotal:0});
-      });
-    } else {
-      prod.variacoes.push({id:uid(),rotulo:tz,tamanho:tz,tecido:'—',medida:tz,custo:emptyCost(),custoTotal:0});
-    }
+    (isSofa?(NP.tecidos.length?NP.tecidos:['Única']):['—']).forEach(tc=>prod.variacoes.push(novaVariacao(isSofa,tz,tc)));
   });
   DB.produtos.push(prod);
   DB.historico.push({id:uid(),user:SESSION.nome,acao:'Cadastro de produto',campo:prod.codigo,ant:'—',novo:`${prod.modelo} (${prod.variacoes.length} var.)`,data:new Date().toISOString()});
+  save(); closeModal(); render();
+}
+/* Renomeia chaves tamanho×tecido de um mapa de preços (suporta trocas A↔B). */
+function renomearChaves(obj, ren){
+  if(!obj || !ren.size) return obj;
+  const alvos=new Set(ren.values()); const out={};
+  Object.keys(obj).forEach(k=>{ if(ren.has(k)) out[ren.get(k)]=obj[k]; else if(!alvos.has(k)) out[k]=obj[k]; });
+  return out;
+}
+function salvarEdicaoProduto(){
+  const p=DB.produtos.find(x=>x.id===NP.editId);
+  if(!p){ alert('Este produto não existe mais (pode ter sido excluído por outro usuário).'); closeModal(); render(); return; }
+  const plano=npPlano(p); const isSofa=plano.isSofa;
+  // tamanhos originais que saíram do produto (fichas de engenharia deles viram fichas avulsas)
+  const tzFicam=new Set(NP.orig.tamanhos.filter(t=>t!=null));
+  const tzSaem=[...new Set(p.variacoes.map(v=>v.tamanho))].filter(t=>!tzFicam.has(t));
+  const fichasSaem=DB.engenharias.filter(e=>e.produtoId===p.id && tzSaem.includes(e.tamanho));
+  if(plano.removidas.length){
+    const lista=plano.removidas.slice(0,12).map(v=>'• '+v.rotulo).join('\n')+(plano.removidas.length>12?`\n… e mais ${plano.removidas.length-12}`:'');
+    const msgFichas=fichasSaem.length?`\n\nAs ${fichasSaem.length} ficha(s) de engenharia dos tamanhos removidos (${tzSaem.join(', ')}) serão mantidas como fichas avulsas.`:'';
+    if(!confirm(`${plano.removidas.length} variação(ões) serão removidas, com seus custos e preços:\n\n${lista}${msgFichas}\n\nContinuar?`)) return;
+  }
+  const antes=`${p.codigo} · ${p.modelo} (${p.variacoes.length} var.)`;
+  // renomeações de chave tamanho×tecido (tabelas de preço / comercial)
+  const ren=new Map();
+  const variacoes=plano.itens.map(({v,tz,tc})=>{
+    if(!v) return novaVariacao(isSofa,tz,tc);
+    const de=comChave(v.tamanho,v.tecido), para=comChave(tz,tc);
+    if(de!==para) ren.set(de,para);
+    v.tamanho=tz; v.tecido=tc;
+    if(isSofa){ v.rotulo=`${tz} · Classe ${tc}`; delete v.medida; } else { v.rotulo=tz; v.medida=tz; }
+    return v;
+  });
+  p.familia=NP.familia; p.modelo=NP.nome.trim(); p.codigo=NP.sku.trim(); p.categoria=NP.cat.trim()||'—'; p.imagem=NP.imagem||'';
+  p.variacoes=variacoes;
+
+  // fichas de engenharia: SKU/item, tamanhos renomeados, classes de tecido
+  const tzRen=new Map(); NP.tamanhos.forEach((t,i)=>{ const o=NP.orig.tamanhos[i]; if(o!=null && o!==t) tzRen.set(o,t); });
+  const tecRen=new Map(); NP.tecidos.forEach((t,i)=>{ const o=NP.orig.tecidos[i]; if(o!=null && o!==t) tecRen.set(o,t); });
+  const tecAtuais=isSofa?[...new Set(variacoes.map(v=>v.tecido).filter(t=>t&&t!=='—'))]:[];
+  DB.engenharias.forEach(e=>{
+    if(e.produtoId!==p.id) return;
+    e.sku=p.codigo; e.item=p.modelo;
+    if(tzSaem.includes(e.tamanho)){ e.produtoId=null; return; }
+    if(tzRen.has(e.tamanho)) e.tamanho=tzRen.get(e.tamanho);
+    const tecs=(e.tecidos||[]).map(t=>tecRen.has(t.classe)?{...t,classe:tecRen.get(t.classe)}:t).filter(t=>tecAtuais.includes(t.classe));
+    tecAtuais.forEach(c=>{ if(!tecs.some(t=>t.classe===c)) tecs.push({classe:c,materialCod:'',materialId:null,consumo:''}); });
+    e.tecidos=tecAtuais.map(c=>tecs.find(t=>t.classe===c));
+  });
+
+  // preços já enviados / importados seguem a variação renomeada
+  if(ren.size){
+    (DB.tabelasPreco||[]).forEach(tab=>{ const d=tab.dados&&tab.dados[p.id]; if(d&&d.precos) d.precos=renomearChaves(d.precos,ren); });
+    const tc=DB.tabelaComercial;
+    if(tc){ if(tc.precos&&tc.precos[p.id]) tc.precos[p.id]=renomearChaves(tc.precos[p.id],ren);
+            if(tc.custos&&tc.custos[p.id]) tc.custos[p.id]=renomearChaves(tc.custos[p.id],ren); }
+  }
+  DB.historico.push({id:uid(),user:SESSION.nome,acao:'Edição de produto',campo:p.codigo,ant:antes,novo:`${p.codigo} · ${p.modelo} (${p.variacoes.length} var.)`,data:new Date().toISOString()});
   save(); closeModal(); render();
 }
 
