@@ -22,6 +22,11 @@ A proteção agora fica **no próprio app**, sem depender do Cloudflare Access:
 Se o site ainda estiver protegido pelo Access, ele vai continuar pedindo login do Cloudflare antes do app. Para remover:
 - **Zero Trust → Access → Applications** → abra a aplicação de `artecubica.app` → **Delete** (ou remova o domínio dela).
 
+## Acesso somente consulta
+- Perfis com **"Pode editar dados" desmarcado** (ex.: **Consulta**, criado automaticamente, e **Vendedor**) só visualizam: no app os botões de alteração somem e os campos ficam travados; continuam liberados busca, filtros, simulador, impressão e exportação para Excel.
+- O **servidor também recusa** (`403`) qualquer gravação em `/api/state` vinda desses perfis, mesmo que alguém tente pelo navegador.
+- Para dar acesso de consulta: **Configurações → Usuários → Novo usuário**, perfil **Consulta**. Os menus visíveis ajustam-se em **Permissões de menu**.
+
 ## Boas práticas
 - **Troque a senha do admin** logo no primeiro acesso (Configurações → Usuários).
 - Cadastre um usuário por pessoa; use senhas fortes.
@@ -31,3 +36,4 @@ Se o site ainda estiver protegido pelo Access, ele vai continuar pedindo login d
 ## Teste
 - `https://SEU-SITE/api/state` sem token → **401 Não autorizado**.
 - Abrir o site → tela de login → entrar com e-mail/senha → funciona.
+- Entrar com um usuário de perfil **Consulta** → aparece o selo "👁 somente consulta" e não há botões de alteração.

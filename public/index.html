@@ -160,7 +160,15 @@ tbody tr:hover{background:var(--surface-2)}
 .eng-tot{text-align:right;font-variant-numeric:tabular-nums}
 .zebra>td{background:rgba(0,0,0,.07)!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 .eng-pend>td{background:rgba(214,48,49,.14)!important;box-shadow:inset 3px 0 0 #d63031}
+/* Madeiras: linhas de MOLDE ficam no fim e destacadas (tela e impressão) */
+.eng-molde>td{background:rgba(232,163,23,.16)}
+.eng-molde>td:first-child{box-shadow:inset 3px 0 0 #e8a317}
+.molde-sep>td{background:var(--amber-bg);color:var(--amber);font-weight:800;font-size:11.5px;letter-spacing:.6px;padding:5px 10px!important;border-top:2px solid var(--amber)}
+.molde-tag{font-weight:800;letter-spacing:.5px}
 .print-only{display:none}
+/* Matéria-prima consolidada: descrição sempre em uma linha (só os títulos das colunas podem quebrar) */
+.mat-cons td{white-space:nowrap}
+.mat-cons th{white-space:normal}
 @media print{
   body{background:#fff}
   .sidebar,.topbar,.no-print,#modalRoot,.app-footer{display:none!important}
@@ -173,6 +181,10 @@ tbody tr:hover{background:var(--surface-2)}
   .eng-block.skip-print{display:none!important}
   .eng-block .no-print{display:none!important}
   .eng-pend>td{background:transparent!important;box-shadow:none!important}
+  .eng-molde>td{background:#d9d9d9!important;font-weight:800;border-top:2px solid #000!important;border-bottom:2px solid #000!important;box-shadow:none!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .eng-molde input{font-weight:800!important}
+  .molde-sep>td{background:#000!important;color:#fff!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  span.print-only{display:inline}
   .eng-sticky,.sticky-head{position:static!important;background:transparent!important}
   input,select{border:none!important;background:transparent!important;padding:0!important;-webkit-appearance:none;appearance:none}
 
@@ -184,6 +196,11 @@ tbody tr:hover{background:var(--surface-2)}
   html.print-eng .eng-block .desc,html.print-eng .eng-block .hint{font-size:9.5px!important}
   html.print-eng .eng-block .hd{padding:5px 9px!important}
   html.print-eng .eng-block .bd{padding:0!important}
+  html.print-eng .eng-block table.mat-cons{table-layout:auto}
+  html.print-eng .eng-block .mat-cons td{white-space:nowrap;word-break:normal}
+  html.print-eng .eng-block .mat-cons th{word-break:normal}
+  /* na folha, a descrição ocupa o espaço livre; se ainda assim não couber, termina em "…" */
+  .mat-cons td.mat-desc{width:100%;max-width:0;overflow:hidden;text-overflow:ellipsis}
 
   /* ===== Impressão do bloco MADEIRA: retrato, fonte maior, só as colunas essenciais ===== */
   html.print-vert .eng-block .no-print{display:none!important}
@@ -305,6 +322,9 @@ function ensureDBDefaults(){
   DB.menuPerms=DB.menuPerms||defaultMenuPerms();
   DB.perfis=DB.perfis||defaultPerfis();
   DB.usuarios=DB.usuarios||defaultUsuarios();
+  // cria uma única vez o perfil "Consulta" (somente leitura); se o admin excluir, não volta
+  if(!DB.perfilConsulta){ if(!DB.perfis.some(pf=>pf.key==='consulta')) DB.perfis.push({key:'consulta',nome:'Consulta',admin:false,editar:false});
+    if(!DB.menuPerms.consulta) DB.menuPerms.consulta=consultaMenuPerms(); DB.perfilConsulta=true; }
   DB.perfis.forEach(pf=>{ if(!pf.admin && !DB.menuPerms[pf.key]) DB.menuPerms[pf.key]=baseMenuPerms(); if(!pf.admin && DB.menuPerms[pf.key].tabelapreco===undefined) DB.menuPerms[pf.key].tabelapreco=true; if(!pf.admin && DB.menuPerms[pf.key].frete===undefined) DB.menuPerms[pf.key].frete=(pf.key==='gestor'); });
   DB.tabelasPreco=Array.isArray(DB.tabelasPreco)?DB.tabelasPreco:[];
   if(!DB.tabelasPreco.length) DB.tabelasPreco=[{id:uid(),nome:'Geral',dados:{}}];
@@ -344,8 +364,11 @@ function markupExcluir(){ if(DB.markups.length<=1){ alert('Deve existir ao menos
 function defaultPerfis(){ return [
   {key:'admin',nome:'Administrador',admin:true,editar:true},
   {key:'gestor',nome:'Gestor',admin:false,editar:true},
-  {key:'vendedor',nome:'Vendedor',admin:false,editar:false}
+  {key:'vendedor',nome:'Vendedor',admin:false,editar:false},
+  {key:'consulta',nome:'Consulta',admin:false,editar:false}
 ];}
+// Menus do perfil "Consulta": vê o sistema todo, menos Markup, Configurações e Backup.
+function consultaMenuPerms(){ return {...baseMenuPerms(), materiaprima:true, engenharia:true, frete:true, tabelapreco:true, comercial:true, impostos:false, config:false, backup:false}; }
 function defaultUsuarios(){ return [
   {id:uid(),nome:'Evandro Zílio',email:'admin@artecubica.com.br',senha:'admin',cargo:'Diretoria',departamento:'Administração',perfil:'admin',status:'Ativo'},
   {id:uid(),nome:'Gestor Comercial',email:'gestor@artecubica.com.br',senha:'123456',cargo:'Comercial',departamento:'Comercial',perfil:'gestor',status:'Ativo'},
@@ -374,7 +397,7 @@ let cloudState={connected:false, timer:null, dirty:false, pushing:false, since:0
 /* ---- Merge por registro (vários usuários ao mesmo tempo sem perder dados) ---- */
 // Coleções (listas) sincronizadas por chave de registro, e campos "avulsos" (último a salvar vence).
 const MERGE_KEYS={ produtos:'id', engenharias:'id', materiais:'id', markups:'id', fretes:'id', descontos:'id', usuarios:'id', perfis:'key', tabelasPreco:'id', historico:'id' };
-const MERGE_SCALARS=['empresa','taxes','desp','comissao','margemAlvo','margemMin','margem','margemExtra','markupAtivo','menuPerms','tpCfg','tabelaComercial','precosTabela'];
+const MERGE_SCALARS=['perfilConsulta','empresa','taxes','desp','comissao','margemAlvo','margemMin','margem','margemExtra','markupAtivo','menuPerms','tpCfg','tabelaComercial','precosTabela'];
 let cloudBase=null; // cópia do último estado em sincronia com o banco (referência para calcular o que mudou)
 function snap(o){ try{ return JSON.parse(JSON.stringify(o)); }catch(e){ return {}; } }
 function setBase(){ cloudBase=snap(DB); }
@@ -459,7 +482,10 @@ async function cloudSyncOnLogin(){
   let server=null;
   try{ const res=await cloudApi('/api/state?chave=default'); if(res.ok){ const j=await res.json(); server=(j&&j.data)?j.data:null; if(j&&j.updatedAt) cloudState.updatedAt=j.updatedAt; } }catch(e){}
   const ls=dbScore(DB), ss=dbScore(server);
-  if(!server){ await cloudPushFull(); }              // banco vazio → migra local
+  if(server && !podeEditarEm(server)){ // perfil de consulta: só lê o banco, nunca envia
+    DB=server; ensureDBDefaults(); try{ localStorage.setItem(DB_KEY, JSON.stringify(DB)); }catch(e){} setBase(); setPending(false);
+    if(SESSION) render(); return; }
+  if(!server){ if(!somenteConsulta()) await cloudPushFull(); }              // banco vazio → migra local
   else if(hasPending() && ls>0 && ls>=ss){ await cloudPushFull(); } // havia mudança local não confirmada → NÃO perde: sobe o local
   else if(!jaMigrou() && ls>ss){ await cloudPushFull(); } // 1ª vez e local mais rico → migra local
   else { DB=server; ensureDBDefaults(); try{ localStorage.setItem(DB_KEY, JSON.stringify(DB)); }catch(e){} setBase(); } // usa o banco
@@ -477,6 +503,7 @@ async function cloudForcarMigracao(){
 // mas garante um envio a cada ~2s no máximo mesmo com digitação contínua.
 function cloudMarkDirty(){
   if(cloudState.applying) return; // mudança veio do próprio pull em tempo real; não reenvia
+  if(somenteConsulta()) return;   // perfil de consulta: nada é enviado ao banco
   setPending(true); // há algo local ainda não confirmado no banco
   if(!cloudState.connected){ cloudState.dirty=true; return; }
   cloudState.dirty=true;
@@ -489,6 +516,7 @@ function cloudMarkDirty(){
 // com o que os outros salvaram (merge por registro) → ninguém perde o trabalho do outro.
 async function cloudPush(immediate){
   if(!cloudState.connected && !immediate) return;
+  if(somenteConsulta()) return;
   if(!cloudGetToken()) return;
   if(cloudState.pushing){ cloudState.dirty=true; return; } // já há um envio em andamento
   const sent=snap(DB); const delta=computeDelta(sent);
@@ -497,6 +525,8 @@ async function cloudPush(immediate){
   try{
     setCloudStatus('salvando…','var(--amber)');
     const res=await cloudApi('/api/state',{method:'PUT',body:JSON.stringify({chave:'default',merge:{keys:MERGE_KEYS,delta}})});
+    if(res.status===403){ // servidor recusou: perfil sem permissão de alterar → não fica tentando de novo
+      cloudState.dirty=false; setPending(false); setCloudStatus('somente consulta','var(--muted)'); return; }
     if(!res.ok) throw new Error('HTTP '+res.status);
     let j=null; try{ j=await res.json(); }catch(e){}
     cloudState.lastPushAt=Date.now();
@@ -531,6 +561,7 @@ async function cloudPush(immediate){
 // Envio COMPLETO (substitui tudo no banco): usado só na 1ª migração, no botão de forçar e na restauração de backup.
 async function cloudPushFull(){
   if(!cloudGetToken()) throw new Error('sem sessão');
+  if(somenteConsulta()) throw new Error('perfil somente consulta');
   const res=await cloudApi('/api/state',{method:'PUT',body:JSON.stringify({chave:'default',data:DB})});
   if(!res.ok) throw new Error('HTTP '+res.status);
   try{ const j=await res.json(); if(j&&j.updatedAt) cloudState.updatedAt=j.updatedAt; }catch(e){}
@@ -540,7 +571,7 @@ async function cloudPushFull(){
 // Ao fechar/ocultar a aba: envia o que ainda estiver pendente (keepalive permite concluir após sair).
 function cloudFlushSync(){
   try{
-    if(!cloudState.connected || !cloudGetToken()) return;
+    if(!cloudState.connected || !cloudGetToken() || somenteConsulta()) return;
     const delta=computeDelta(DB);
     if(deltaVazio(delta)) return;
     fetch(cloudUrl()+'/api/state',{method:'PUT',keepalive:true,
@@ -732,6 +763,8 @@ function render(){
     produtos:viewProdutos, materiaprima:viewMateriaPrima, engenharia:viewEngenharia, impostos:viewImpostos, frete:viewFrete, tabelapreco:viewTabelaPreco, comercial:viewComercial, relatorios:viewRelatorios, config:viewConfig, backup:viewBackup}[currentView])();
   if(currentView==='calc') initCalc();
   if(currentView==='simulador') initSim();
+  travarConsulta(c);
+  const rb=el('roBadge'); if(rb) rb.style.display=somenteConsulta()?'':'none';
 }
 
 /* ---------- helpers de produto ---------- */
@@ -1444,12 +1477,14 @@ function engCellFor(eng,blk,r,i,c,editavel){
   return `<td><input class="inp" value="${(r[c[0]]==null?'':r[c[0]]).toString().replace(/"/g,'&quot;')}" oninput="onEngEdit('${key}',${i},'${c[0]}',this)" ${editavel?'':'disabled'}></td>`;
 }
 function engBlockCard(eng,blk,idx,editavel){
-  if(blk.key==='madeira' && eng.madeiraOrd) engOrdenaMadeiraArr(eng); // mantém a ordenação salva
+  if(blk.key==='madeira') engOrdenaMadeiraArr(eng); // mantém a ordenação salva e os moldes no fim
   const rows=engBlock(eng,blk.key);
   const matTh='<th class="col-mat">Matéria-prima</th>';
   const unTh='<th class="col-un" title="Unidade de medida do insumo">Un.</th>';
   const colsTh=blk.cols.map(c=>`<th class="col-${c[0]}">${c[1]}</th>`).join('');
-  const th=(blk.matFirst?matTh+unTh+colsTh:colsTh+matTh+unTh)+'<th class="no-print" title="Marque para valer em todos os tamanhos">Padrão</th>';
+  const isMad=blk.key==='madeira';
+  const moldeTh=isMad?'<th class="col-molde" title="Marque as linhas que são molde: vão para o fim da lista e saem destacadas na impressão">Molde</th>':'';
+  const th=(blk.matFirst?matTh+unTh+colsTh:colsTh+matTh+unTh)+moldeTh+'<th class="no-print" title="Marque para valer em todos os tamanhos">Padrão</th>';
   // Zebra por densidade (espumas): cada densidade distinta alterna faixa — listrado na impressão P&B
   let zebra=null;
   if(blk.key==='espumas'){ zebra={}; [...new Set(rows.map(x=>(x.ref||'').trim()))].forEach((rf,idx)=>{ zebra[rf]=idx%2; }); }
@@ -1459,11 +1494,13 @@ function engBlockCard(eng,blk,idx,editavel){
     const un=`<td class="muted col-un" id="engun_${blk.key}_${i}" style="text-align:center;white-space:nowrap;font-weight:600">${(engMatUnid(r)||'—').toString().replace(/</g,'&lt;')}</td>`;
     const pad=`<td class="no-print" style="text-align:center"><input type="checkbox" title="Padrão para todos os tamanhos" ${r.padrao?'checked':''} onchange="onEngPadrao('${blk.key}',${i},this)" ${editavel?'':'disabled'}></td>`;
     const del=editavel?`<td class="no-print" style="white-space:nowrap">${r._pend?`<button class="btn sm" title="Conferir (tirar destaque vermelho)" onclick="engConferirLinha('${blk.key}',${i})">✓</button> `:''}<button class="btn sm danger" onclick="engDelRow('${blk.key}',${i})">✕</button></td>`:'';
-    const cls=[]; if(zebra && zebra[(r.ref||'').trim()]) cls.push('zebra'); if(r._pend) cls.push('eng-pend');
+    const molde=isMad?`<td class="col-molde" style="text-align:center"><input type="checkbox" class="no-print" title="Esta linha é molde" ${r.molde?'checked':''} onchange="onEngMolde(${i},this)" ${editavel?'':'disabled'}>${r.molde?'<span class="print-only molde-tag">MOLDE</span>':''}</td>`:'';
+    const cls=[]; if(zebra && zebra[(r.ref||'').trim()]) cls.push('zebra'); if(r._pend) cls.push('eng-pend'); if(isMad && r.molde) cls.push('eng-molde');
     const clsAttr=cls.length?` class="${cls.join(' ')}"`:'';
-    return `<tr id="engrow_${blk.key}_${i}"${clsAttr}>${blk.matFirst?mc+un+colsCells:colsCells+mc+un}${pad}${del}</tr>`;
+    const sep=(isMad && r.molde && !(i>0 && rows[i-1].molde))?`<tr class="molde-sep"><td colspan="${blk.cols.length+4+(editavel?1:0)}">MOLDES</td></tr>`:'';
+    return `${sep}<tr id="engrow_${blk.key}_${i}"${clsAttr}>${blk.matFirst?mc+un+colsCells:colsCells+mc+un}${molde}${pad}${del}</tr>`;
   }).join('');
-  const ncols=blk.cols.length+3;
+  const ncols=blk.cols.length+3+(isMad?1:0);
   return `<div class="card eng-block" id="engblock_${blk.key}" style="margin-bottom:18px">
     <div class="hd">
       <div class="row" style="gap:10px">
@@ -1538,8 +1575,8 @@ function engMateriaisResumo(eng){
 function engMateriaisTabelaInner(eng){
   const mats=engMateriaisResumo(eng);
   const totalGeral=mats.filter(m=>!m.tecido).reduce((a,m)=>a+m.custoTotal,0);
-  return `<div style="overflow:auto"><table><thead><tr><th>Cód. matéria-prima</th><th>Descrição</th><th>Unid.</th><th>Quantidade somada</th><th>Custo unit.</th><th>Custo total</th></tr></thead>
-    <tbody>${mats.map(m=>`<tr><td><b>${m.cod}</b></td><td>${m.descricao||'—'}${m.tecido?' <span class="tag blue" style="font-size:10px">tecido (consumo)</span>':''}</td><td class="muted">${m.unidade||'—'}</td><td class="eng-tot">${fmtQtd(m.qtd)}</td><td class="eng-tot">${money(m.custoUnit)}</td><td class="eng-tot" style="font-weight:700">${m.tecido?'<span class="muted">anotação</span>':money(m.custoTotal)}</td></tr>`).join('')||`<tr><td colspan="6" class="muted" style="padding:12px">Vincule matérias-primas nos blocos para consolidar aqui.</td></tr>`}</tbody>
+  return `<div style="overflow:auto"><table class="mat-cons"><thead><tr><th>Cód. matéria-prima</th><th>Descrição</th><th>Unid.</th><th>Quantidade somada</th><th>Custo unit.</th><th>Custo total</th></tr></thead>
+    <tbody>${mats.map(m=>`<tr><td><b>${m.cod}</b></td><td class="mat-desc" title="${(m.descricao||'').toString().replace(/"/g,'&quot;')}">${m.descricao||'—'}${m.tecido?' <span class="tag blue" style="font-size:10px">tecido (consumo)</span>':''}</td><td class="muted">${m.unidade||'—'}</td><td class="eng-tot">${fmtQtd(m.qtd)}</td><td class="eng-tot">${money(m.custoUnit)}</td><td class="eng-tot" style="font-weight:700">${m.tecido?'<span class="muted">anotação</span>':money(m.custoTotal)}</td></tr>`).join('')||`<tr><td colspan="6" class="muted" style="padding:12px">Vincule matérias-primas nos blocos para consolidar aqui.</td></tr>`}</tbody>
     ${mats.length?`<tfoot><tr><td colspan="5" style="text-align:right;font-weight:700">Total geral (= custo base)</td><td class="eng-tot" style="font-weight:800;color:var(--primary)">${money(totalGeral)}</td></tr></tfoot>`:''}
     </table></div>`;
 }
@@ -1606,6 +1643,9 @@ function engRezebra(eng){
   const map={}; [...new Set(rows.map(x=>(x.ref||'').trim()))].forEach((rf,idx)=>{ map[rf]=idx%2; });
   rows.forEach((r,i)=>{ const tr=el('engrow_espumas_'+i); if(tr) tr.classList.toggle('zebra', !!map[(r.ref||'').trim()]); });
 }
+// Marca/desmarca a linha de Madeira como MOLDE; moldes ficam sempre no fim da lista.
+function onEngMolde(i,inputEl){ const eng=engCurrent(); if(!eng) return; const r=eng.blocos.madeira[i]; if(!r) return;
+  r.molde=inputEl.checked; r._pend=false; engTocarRevisao(eng); save(); render(); }
 function onEngPadrao(key,i,inputEl){ const eng=engCurrent(); if(!eng) return; eng.blocos[key][i].padrao=inputEl.checked; save(); }
 function engRemoverBloco(key){
   const eng=engCurrent(); if(!eng) return;
@@ -1691,11 +1731,13 @@ function engReplicarComposicao(){
   engTocarRevisao(eng); save(); render();
   alert(`Composição replicada para ${irmaos.length} tamanho(s). Ajuste as dimensões e quantidades de cada um.`);
 }
-// Ordena o array do bloco Madeiras conforme o critério salvo em eng.madeiraOrd.
+// Ordena o array do bloco Madeiras conforme o critério salvo em eng.madeiraOrd e põe os moldes no fim.
 // spec = "campo[,campo2]|asc|desc". Ex.: "larg,compr|asc" agrupa por largura e,
 // dentro de cada largura, ordena o comprimento de A→Z.
 function engOrdenaMadeiraArr(eng){
-  const spec=eng&&eng.madeiraOrd; if(!spec) return;
+  const arr=(eng&&eng.blocos&&eng.blocos.madeira)||[];
+  const spec=eng&&eng.madeiraOrd;
+  if(spec){
   let parts;
   if(spec.includes(':')){ // formato por campo: "compr:desc,larg:asc"
     parts=spec.split(',').map(s=>{ const[f,d]=s.split(':'); return {f, mul:(d==='desc'?-1:1)}; });
@@ -1703,8 +1745,12 @@ function engOrdenaMadeiraArr(eng){
     const [fieldsS,dir]=spec.split('|'); const mul=(dir==='desc')?-1:1;
     parts=fieldsS.split(',').map(f=>({f, mul}));
   }
-  const arr=(eng.blocos&&eng.blocos.madeira)||[];
   arr.sort((a,b)=>{ for(const p of parts){ const d=(num(a[p.f])-num(b[p.f]))*p.mul; if(d) return d; } return 0; });
+  }
+  // linhas de MOLDE sempre por último (mantendo a ordem entre elas)
+  if(arr.some(r=>r.molde) && arr.some((r,i)=>!r.molde && i>0 && arr[i-1].molde)){
+    const fim=arr.filter(r=>r.molde), ini=arr.filter(r=>!r.molde); arr.length=0; arr.push(...ini,...fim);
+  }
 }
 // Grava o critério de ordenação (para o SKU inteiro) e já reordena todos os tamanhos.
 function engOrdenarMadeira(spec){
@@ -2676,6 +2722,34 @@ function excluirPerfil(key){
 }
 
 /* ---------- permissões ---------- */
+/* ---------- Perfil somente consulta ----------
+   Quem não tem "Pode editar dados" só visualiza: botões de alteração somem, campos ficam
+   travados e nada é enviado ao banco (o servidor também recusa). */
+function somenteConsulta(){ return !!SESSION && !can('editar'); }
+function podeEditarEm(db){ if(!SESSION) return false; if(SESSION.admin) return true;
+  const pf=((db&&db.perfis)||[]).find(p=>p.key===SESSION.role); return !!(pf && (pf.admin||pf.editar)); }
+// Ações que apenas navegam, filtram, simulam, imprimem ou exportam: continuam liberadas.
+const RO_OK=new Set(['el','if','nav','filterProd','mpFilter','calFilter','calcRerender','setCalcMode','toggleDet','repTab','tpSet','comSet','simRun','simFromProduct',
+  'engSelId','engSelGroup','engMarcarTodos','engPrintBloco','engPrintTodos','engPrintSelecionados','window.print','exportTabelaPrecoXlsx','exportExcel','exportComercialXlsx','exportCSV',
+  'backupGerar','baixarModeloMP','closeModal']);
+function roPermitido(c){
+  if(c.classList.contains('engchk')) return true; // escolher blocos para imprimir
+  const h=['onclick','onchange','oninput'].map(a=>c.getAttribute(a)||'').join(';');
+  const fns=[...h.matchAll(/([A-Za-z_$][\w$.]*)\s*\(/g)].map(m=>m[1]);
+  if(!fns.length) return c.tagName==='BUTTON' ? false : /Busca$/.test(c.id||'');
+  return fns.every(f=>RO_OK.has(f));
+}
+function travarConsulta(root){
+  if(!root || !root.querySelectorAll || !somenteConsulta()) return;
+  const ctrls=[...root.querySelectorAll('button,input,select,textarea')]; if(root.matches && root.matches('button,input,select,textarea')) ctrls.push(root);
+  ctrls.forEach(c=>{
+    if(roPermitido(c)) return;
+    if(c.tagName==='BUTTON'){ c.style.display='none'; return; }
+    if(c.type==='file'){ const lb=c.closest('label'); if(lb) lb.style.display='none'; }
+    c.disabled=true;
+  });
+}
+const roObserver=(typeof MutationObserver!=='undefined')? new MutationObserver(ms=>{ if(!somenteConsulta()) return; ms.forEach(m=>m.addedNodes.forEach(n=>{ if(n.nodeType===1) travarConsulta(n); })); }) : null;
 function currentPerfil(){ return DB.perfis.find(pf=>pf.key===SESSION.role); }
 function can(p){ if(SESSION&&SESSION.admin) return true; const pf=currentPerfil(); if(!pf) return false; if(pf.admin) return true; if(p==='impostos') return false; if(p==='relatorios') return true; return !!pf.editar; }
 
@@ -2726,7 +2800,8 @@ function entrarApp(){
   el('appRoot').classList.remove('hidden');
   const pfNome=(currentPerfil()||{}).nome||SESSION.role;
   el('userBox').innerHTML=`<div class="row" style="gap:9px"><div style="width:32px;height:32px;border-radius:50%;background:var(--primary);color:#fff;display:grid;place-items:center;font-weight:700">${SESSION.nome[0]}</div>
-    <div><b style="font-size:12.5px">${SESSION.nome}</b><br><span class="badge-lvl">${pfNome}</span></div></div>`;
+    <div><b style="font-size:12.5px">${SESSION.nome}</b><br><span class="badge-lvl">${pfNome}</span> <span id="roBadge" class="badge-lvl" title="Este perfil só visualiza; não pode alterar dados" style="${somenteConsulta()?'':'display:none'}">👁 somente consulta</span></div></div>`;
+  if(roObserver){ roObserver.disconnect(); roObserver.observe(el('content'),{childList:true,subtree:true}); roObserver.observe(el('modalRoot'),{childList:true,subtree:true}); }
   el('empChip').textContent='🏢 '+DB.empresa;
   applyMenuPerms();
   nav(firstAllowedView()||'dashboard');
