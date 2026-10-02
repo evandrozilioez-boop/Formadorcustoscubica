@@ -157,8 +157,8 @@ export default {
 
       // GET/PUT /api/state → dados no PostgreSQL (exige o token da aplicação)
       if (path === '/api/state') {
-        const token = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
-        if (!(await verifyToken(token, env))) return json({ message: 'Não autorizado' }, 401);
+        const payload = await appTokenPayload(request, env);
+        if (!payload) return json({ message: 'Não autorizado' }, 401);
         if (!env.HYPERDRIVE || !env.HYPERDRIVE.connectionString) return json({ message: 'PostgreSQL/Hyperdrive não configurado' }, 500);
         const chave = url.searchParams.get('chave') || 'default';
         const sql = postgres(env.HYPERDRIVE.connectionString, { max: 5, fetch_types: false });
@@ -171,6 +171,15 @@ export default {
           if (request.method === 'PUT') {
             let body; try { body = await request.json(); } catch (e) { return json({ message: 'JSON inválido' }, 400); }
             const key = body.chave || chave;
+            // Perfil "somente consulta" (Pode editar dados = desmarcado) não grava nada no banco.
+            if (!payload.admin) {
+              const pr = await sql`SELECT data->'perfis' AS perfis FROM app_state WHERE chave = ${key}`;
+              const perfis = pr[0] && Array.isArray(pr[0].perfis) ? pr[0].perfis : null;
+              if (perfis) {
+                const pf = perfis.find((p) => p && p.key === payload.role);
+                if (!pf || !(pf.admin || pf.editar)) return json({ message: 'Perfil somente consulta: sem permissão para alterar dados' }, 403);
+              }
+            }
 
             // ---- Modo MERGE: combina só os registros que o usuário mudou (vários usuários ao mesmo tempo) ----
             if (body.merge) {

@@ -322,6 +322,9 @@ function ensureDBDefaults(){
   DB.menuPerms=DB.menuPerms||defaultMenuPerms();
   DB.perfis=DB.perfis||defaultPerfis();
   DB.usuarios=DB.usuarios||defaultUsuarios();
+  // cria uma única vez o perfil "Consulta" (somente leitura); se o admin excluir, não volta
+  if(!DB.perfilConsulta){ if(!DB.perfis.some(pf=>pf.key==='consulta')) DB.perfis.push({key:'consulta',nome:'Consulta',admin:false,editar:false});
+    if(!DB.menuPerms.consulta) DB.menuPerms.consulta=consultaMenuPerms(); DB.perfilConsulta=true; }
   DB.perfis.forEach(pf=>{ if(!pf.admin && !DB.menuPerms[pf.key]) DB.menuPerms[pf.key]=baseMenuPerms(); if(!pf.admin && DB.menuPerms[pf.key].tabelapreco===undefined) DB.menuPerms[pf.key].tabelapreco=true; if(!pf.admin && DB.menuPerms[pf.key].frete===undefined) DB.menuPerms[pf.key].frete=(pf.key==='gestor'); });
   DB.tabelasPreco=Array.isArray(DB.tabelasPreco)?DB.tabelasPreco:[];
   if(!DB.tabelasPreco.length) DB.tabelasPreco=[{id:uid(),nome:'Geral',dados:{}}];
@@ -361,8 +364,11 @@ function markupExcluir(){ if(DB.markups.length<=1){ alert('Deve existir ao menos
 function defaultPerfis(){ return [
   {key:'admin',nome:'Administrador',admin:true,editar:true},
   {key:'gestor',nome:'Gestor',admin:false,editar:true},
-  {key:'vendedor',nome:'Vendedor',admin:false,editar:false}
+  {key:'vendedor',nome:'Vendedor',admin:false,editar:false},
+  {key:'consulta',nome:'Consulta',admin:false,editar:false}
 ];}
+// Menus do perfil "Consulta": vê o sistema todo, menos Markup, Configurações e Backup.
+function consultaMenuPerms(){ return {...baseMenuPerms(), materiaprima:true, engenharia:true, frete:true, tabelapreco:true, comercial:true, impostos:false, config:false, backup:false}; }
 function defaultUsuarios(){ return [
   {id:uid(),nome:'Evandro Zílio',email:'admin@artecubica.com.br',senha:'admin',cargo:'Diretoria',departamento:'Administração',perfil:'admin',status:'Ativo'},
   {id:uid(),nome:'Gestor Comercial',email:'gestor@artecubica.com.br',senha:'123456',cargo:'Comercial',departamento:'Comercial',perfil:'gestor',status:'Ativo'},
@@ -391,7 +397,7 @@ let cloudState={connected:false, timer:null, dirty:false, pushing:false, since:0
 /* ---- Merge por registro (vários usuários ao mesmo tempo sem perder dados) ---- */
 // Coleções (listas) sincronizadas por chave de registro, e campos "avulsos" (último a salvar vence).
 const MERGE_KEYS={ produtos:'id', engenharias:'id', materiais:'id', markups:'id', fretes:'id', descontos:'id', usuarios:'id', perfis:'key', tabelasPreco:'id', historico:'id' };
-const MERGE_SCALARS=['empresa','taxes','desp','comissao','margemAlvo','margemMin','margem','margemExtra','markupAtivo','menuPerms','tpCfg','tabelaComercial','precosTabela'];
+const MERGE_SCALARS=['perfilConsulta','empresa','taxes','desp','comissao','margemAlvo','margemMin','margem','margemExtra','markupAtivo','menuPerms','tpCfg','tabelaComercial','precosTabela'];
 let cloudBase=null; // cópia do último estado em sincronia com o banco (referência para calcular o que mudou)
 function snap(o){ try{ return JSON.parse(JSON.stringify(o)); }catch(e){ return {}; } }
 function setBase(){ cloudBase=snap(DB); }
@@ -476,7 +482,10 @@ async function cloudSyncOnLogin(){
   let server=null;
   try{ const res=await cloudApi('/api/state?chave=default'); if(res.ok){ const j=await res.json(); server=(j&&j.data)?j.data:null; if(j&&j.updatedAt) cloudState.updatedAt=j.updatedAt; } }catch(e){}
   const ls=dbScore(DB), ss=dbScore(server);
-  if(!server){ await cloudPushFull(); }              // banco vazio → migra local
+  if(server && !podeEditarEm(server)){ // perfil de consulta: só lê o banco, nunca envia
+    DB=server; ensureDBDefaults(); try{ localStorage.setItem(DB_KEY, JSON.stringify(DB)); }catch(e){} setBase(); setPending(false);
+    if(SESSION) render(); return; }
+  if(!server){ if(!somenteConsulta()) await cloudPushFull(); }              // banco vazio → migra local
   else if(hasPending() && ls>0 && ls>=ss){ await cloudPushFull(); } // havia mudança local não confirmada → NÃO perde: sobe o local
   else if(!jaMigrou() && ls>ss){ await cloudPushFull(); } // 1ª vez e local mais rico → migra local
   else { DB=server; ensureDBDefaults(); try{ localStorage.setItem(DB_KEY, JSON.stringify(DB)); }catch(e){} setBase(); } // usa o banco
@@ -494,6 +503,7 @@ async function cloudForcarMigracao(){
 // mas garante um envio a cada ~2s no máximo mesmo com digitação contínua.
 function cloudMarkDirty(){
   if(cloudState.applying) return; // mudança veio do próprio pull em tempo real; não reenvia
+  if(somenteConsulta()) return;   // perfil de consulta: nada é enviado ao banco
   setPending(true); // há algo local ainda não confirmado no banco
   if(!cloudState.connected){ cloudState.dirty=true; return; }
   cloudState.dirty=true;
@@ -506,6 +516,7 @@ function cloudMarkDirty(){
 // com o que os outros salvaram (merge por registro) → ninguém perde o trabalho do outro.
 async function cloudPush(immediate){
   if(!cloudState.connected && !immediate) return;
+  if(somenteConsulta()) return;
   if(!cloudGetToken()) return;
   if(cloudState.pushing){ cloudState.dirty=true; return; } // já há um envio em andamento
   const sent=snap(DB); const delta=computeDelta(sent);
@@ -514,6 +525,8 @@ async function cloudPush(immediate){
   try{
     setCloudStatus('salvando…','var(--amber)');
     const res=await cloudApi('/api/state',{method:'PUT',body:JSON.stringify({chave:'default',merge:{keys:MERGE_KEYS,delta}})});
+    if(res.status===403){ // servidor recusou: perfil sem permissão de alterar → não fica tentando de novo
+      cloudState.dirty=false; setPending(false); setCloudStatus('somente consulta','var(--muted)'); return; }
     if(!res.ok) throw new Error('HTTP '+res.status);
     let j=null; try{ j=await res.json(); }catch(e){}
     cloudState.lastPushAt=Date.now();
@@ -548,6 +561,7 @@ async function cloudPush(immediate){
 // Envio COMPLETO (substitui tudo no banco): usado só na 1ª migração, no botão de forçar e na restauração de backup.
 async function cloudPushFull(){
   if(!cloudGetToken()) throw new Error('sem sessão');
+  if(somenteConsulta()) throw new Error('perfil somente consulta');
   const res=await cloudApi('/api/state',{method:'PUT',body:JSON.stringify({chave:'default',data:DB})});
   if(!res.ok) throw new Error('HTTP '+res.status);
   try{ const j=await res.json(); if(j&&j.updatedAt) cloudState.updatedAt=j.updatedAt; }catch(e){}
@@ -557,7 +571,7 @@ async function cloudPushFull(){
 // Ao fechar/ocultar a aba: envia o que ainda estiver pendente (keepalive permite concluir após sair).
 function cloudFlushSync(){
   try{
-    if(!cloudState.connected || !cloudGetToken()) return;
+    if(!cloudState.connected || !cloudGetToken() || somenteConsulta()) return;
     const delta=computeDelta(DB);
     if(deltaVazio(delta)) return;
     fetch(cloudUrl()+'/api/state',{method:'PUT',keepalive:true,
@@ -749,6 +763,8 @@ function render(){
     produtos:viewProdutos, materiaprima:viewMateriaPrima, engenharia:viewEngenharia, impostos:viewImpostos, frete:viewFrete, tabelapreco:viewTabelaPreco, comercial:viewComercial, relatorios:viewRelatorios, config:viewConfig, backup:viewBackup}[currentView])();
   if(currentView==='calc') initCalc();
   if(currentView==='simulador') initSim();
+  travarConsulta(c);
+  const rb=el('roBadge'); if(rb) rb.style.display=somenteConsulta()?'':'none';
 }
 
 /* ---------- helpers de produto ---------- */
@@ -2706,6 +2722,34 @@ function excluirPerfil(key){
 }
 
 /* ---------- permissões ---------- */
+/* ---------- Perfil somente consulta ----------
+   Quem não tem "Pode editar dados" só visualiza: botões de alteração somem, campos ficam
+   travados e nada é enviado ao banco (o servidor também recusa). */
+function somenteConsulta(){ return !!SESSION && !can('editar'); }
+function podeEditarEm(db){ if(!SESSION) return false; if(SESSION.admin) return true;
+  const pf=((db&&db.perfis)||[]).find(p=>p.key===SESSION.role); return !!(pf && (pf.admin||pf.editar)); }
+// Ações que apenas navegam, filtram, simulam, imprimem ou exportam: continuam liberadas.
+const RO_OK=new Set(['el','if','nav','filterProd','mpFilter','calFilter','calcRerender','setCalcMode','toggleDet','repTab','tpSet','comSet','simRun','simFromProduct',
+  'engSelId','engSelGroup','engMarcarTodos','engPrintBloco','engPrintTodos','engPrintSelecionados','window.print','exportTabelaPrecoXlsx','exportExcel','exportComercialXlsx','exportCSV',
+  'backupGerar','baixarModeloMP','closeModal']);
+function roPermitido(c){
+  if(c.classList.contains('engchk')) return true; // escolher blocos para imprimir
+  const h=['onclick','onchange','oninput'].map(a=>c.getAttribute(a)||'').join(';');
+  const fns=[...h.matchAll(/([A-Za-z_$][\w$.]*)\s*\(/g)].map(m=>m[1]);
+  if(!fns.length) return c.tagName==='BUTTON' ? false : /Busca$/.test(c.id||'');
+  return fns.every(f=>RO_OK.has(f));
+}
+function travarConsulta(root){
+  if(!root || !root.querySelectorAll || !somenteConsulta()) return;
+  const ctrls=[...root.querySelectorAll('button,input,select,textarea')]; if(root.matches && root.matches('button,input,select,textarea')) ctrls.push(root);
+  ctrls.forEach(c=>{
+    if(roPermitido(c)) return;
+    if(c.tagName==='BUTTON'){ c.style.display='none'; return; }
+    if(c.type==='file'){ const lb=c.closest('label'); if(lb) lb.style.display='none'; }
+    c.disabled=true;
+  });
+}
+const roObserver=(typeof MutationObserver!=='undefined')? new MutationObserver(ms=>{ if(!somenteConsulta()) return; ms.forEach(m=>m.addedNodes.forEach(n=>{ if(n.nodeType===1) travarConsulta(n); })); }) : null;
 function currentPerfil(){ return DB.perfis.find(pf=>pf.key===SESSION.role); }
 function can(p){ if(SESSION&&SESSION.admin) return true; const pf=currentPerfil(); if(!pf) return false; if(pf.admin) return true; if(p==='impostos') return false; if(p==='relatorios') return true; return !!pf.editar; }
 
@@ -2756,7 +2800,8 @@ function entrarApp(){
   el('appRoot').classList.remove('hidden');
   const pfNome=(currentPerfil()||{}).nome||SESSION.role;
   el('userBox').innerHTML=`<div class="row" style="gap:9px"><div style="width:32px;height:32px;border-radius:50%;background:var(--primary);color:#fff;display:grid;place-items:center;font-weight:700">${SESSION.nome[0]}</div>
-    <div><b style="font-size:12.5px">${SESSION.nome}</b><br><span class="badge-lvl">${pfNome}</span></div></div>`;
+    <div><b style="font-size:12.5px">${SESSION.nome}</b><br><span class="badge-lvl">${pfNome}</span> <span id="roBadge" class="badge-lvl" title="Este perfil só visualiza; não pode alterar dados" style="${somenteConsulta()?'':'display:none'}">👁 somente consulta</span></div></div>`;
+  if(roObserver){ roObserver.disconnect(); roObserver.observe(el('content'),{childList:true,subtree:true}); roObserver.observe(el('modalRoot'),{childList:true,subtree:true}); }
   el('empChip').textContent='🏢 '+DB.empresa;
   applyMenuPerms();
   nav(firstAllowedView()||'dashboard');
