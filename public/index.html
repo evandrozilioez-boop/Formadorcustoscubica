@@ -166,6 +166,9 @@ tbody tr:hover{background:var(--surface-2)}
 .molde-sep>td{background:var(--amber-bg);color:var(--amber);font-weight:800;font-size:11.5px;letter-spacing:.6px;padding:5px 10px!important;border-top:2px solid var(--amber)}
 .molde-tag{font-weight:800;letter-spacing:.5px}
 .print-only{display:none}
+/* Matéria-prima consolidada: descrição sempre em uma linha (só os títulos das colunas podem quebrar) */
+.mat-cons td{white-space:nowrap}
+.mat-cons th{white-space:normal}
 @media print{
   body{background:#fff}
   .sidebar,.topbar,.no-print,#modalRoot,.app-footer{display:none!important}
@@ -193,6 +196,11 @@ tbody tr:hover{background:var(--surface-2)}
   html.print-eng .eng-block .desc,html.print-eng .eng-block .hint{font-size:9.5px!important}
   html.print-eng .eng-block .hd{padding:5px 9px!important}
   html.print-eng .eng-block .bd{padding:0!important}
+  html.print-eng .eng-block table.mat-cons{table-layout:auto}
+  html.print-eng .eng-block .mat-cons td{white-space:nowrap;word-break:normal}
+  html.print-eng .eng-block .mat-cons th{word-break:normal}
+  /* na folha, a descrição ocupa o espaço livre; se ainda assim não couber, termina em "…" */
+  .mat-cons td.mat-desc{width:100%;max-width:0;overflow:hidden;text-overflow:ellipsis}
 
   /* ===== Impressão do bloco MADEIRA: retrato, fonte maior, só as colunas essenciais ===== */
   html.print-vert .eng-block .no-print{display:none!important}
@@ -1551,8 +1559,8 @@ function engMateriaisResumo(eng){
 function engMateriaisTabelaInner(eng){
   const mats=engMateriaisResumo(eng);
   const totalGeral=mats.filter(m=>!m.tecido).reduce((a,m)=>a+m.custoTotal,0);
-  return `<div style="overflow:auto"><table><thead><tr><th>Cód. matéria-prima</th><th>Descrição</th><th>Unid.</th><th>Quantidade somada</th><th>Custo unit.</th><th>Custo total</th></tr></thead>
-    <tbody>${mats.map(m=>`<tr><td><b>${m.cod}</b></td><td>${m.descricao||'—'}${m.tecido?' <span class="tag blue" style="font-size:10px">tecido (consumo)</span>':''}</td><td class="muted">${m.unidade||'—'}</td><td class="eng-tot">${fmtQtd(m.qtd)}</td><td class="eng-tot">${money(m.custoUnit)}</td><td class="eng-tot" style="font-weight:700">${m.tecido?'<span class="muted">anotação</span>':money(m.custoTotal)}</td></tr>`).join('')||`<tr><td colspan="6" class="muted" style="padding:12px">Vincule matérias-primas nos blocos para consolidar aqui.</td></tr>`}</tbody>
+  return `<div style="overflow:auto"><table class="mat-cons"><thead><tr><th>Cód. matéria-prima</th><th>Descrição</th><th>Unid.</th><th>Quantidade somada</th><th>Custo unit.</th><th>Custo total</th></tr></thead>
+    <tbody>${mats.map(m=>`<tr><td><b>${m.cod}</b></td><td class="mat-desc" title="${(m.descricao||'').toString().replace(/"/g,'&quot;')}">${m.descricao||'—'}${m.tecido?' <span class="tag blue" style="font-size:10px">tecido (consumo)</span>':''}</td><td class="muted">${m.unidade||'—'}</td><td class="eng-tot">${fmtQtd(m.qtd)}</td><td class="eng-tot">${money(m.custoUnit)}</td><td class="eng-tot" style="font-weight:700">${m.tecido?'<span class="muted">anotação</span>':money(m.custoTotal)}</td></tr>`).join('')||`<tr><td colspan="6" class="muted" style="padding:12px">Vincule matérias-primas nos blocos para consolidar aqui.</td></tr>`}</tbody>
     ${mats.length?`<tfoot><tr><td colspan="5" style="text-align:right;font-weight:700">Total geral (= custo base)</td><td class="eng-tot" style="font-weight:800;color:var(--primary)">${money(totalGeral)}</td></tr></tfoot>`:''}
     </table></div>`;
 }
