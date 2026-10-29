@@ -166,6 +166,21 @@ tbody tr:hover{background:var(--surface-2)}
 .molde-sep>td{background:var(--amber-bg);color:var(--amber);font-weight:800;font-size:11.5px;letter-spacing:.6px;padding:5px 10px!important;border-top:2px solid var(--amber)}
 .molde-tag{font-weight:800;letter-spacing:.5px}
 .print-only{display:none}
+/* Aprovação da Engenharia: alterações pendentes em vermelho */
+td[data-aprov]{background:rgba(214,48,49,.16)!important;box-shadow:inset 0 0 0 2px #d63031}
+td[data-aprov] input,td[data-aprov] select{color:#c0392b!important;font-weight:700}
+tr[data-aprovnovo]>td{background:rgba(214,48,49,.16)!important}
+tr[data-aprovnovo] input,tr[data-aprovnovo] select{color:#c0392b!important;font-weight:700}
+.eng-aprov-del>td{color:#c0392b;background:rgba(214,48,49,.07)!important}
+.eng-aprov-del .riscado{text-decoration:line-through}
+.eng-devol>td{background:rgba(232,163,23,.14)!important;color:var(--text);font-size:12.5px;border-left:3px solid #e8a317}
+.eng-aprov-acoes{white-space:nowrap;text-align:center}
+.eng-aprov-acoes .btn{padding:3px 8px}
+.eng-banner{border:2px solid #d63031;background:rgba(214,48,49,.06)}
+.eng-banner-cad{border:2px solid var(--amber);background:var(--amber-bg)}
+.eng-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#d63031;margin-left:6px;vertical-align:middle}
+.nav-badge{margin-left:auto;background:#d63031;color:#fff;border-radius:10px;font-size:11px;font-weight:800;padding:1px 7px;line-height:16px}
+.eng-notif-item{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)}
 /* Matéria-prima consolidada: descrição sempre em uma linha (só os títulos das colunas podem quebrar) */
 .mat-cons td{white-space:nowrap}
 .mat-cons th{white-space:normal}
@@ -325,6 +340,10 @@ function ensureDBDefaults(){
   // cria uma única vez o perfil "Consulta" (somente leitura); se o admin excluir, não volta
   if(!DB.perfilConsulta){ if(!DB.perfis.some(pf=>pf.key==='consulta')) DB.perfis.push({key:'consulta',nome:'Consulta',admin:false,editar:false});
     if(!DB.menuPerms.consulta) DB.menuPerms.consulta=consultaMenuPerms(); DB.perfilConsulta=true; }
+  // aprovação da Engenharia: Desenvolvimento precisa de aprovação; PCP aprova (só se ainda não configurado)
+  DB.perfis.forEach(pf=>{ if(pf.engAprovacao===undefined && /desenvolv/i.test(pf.nome||'')) pf.engAprovacao=true; if(pf.engAprova===undefined && /\bpcp\b/i.test(pf.nome||'')) pf.engAprova=true; });
+  // fichas existentes: com composição = cadastro concluído; vazias = em cadastro
+  (DB.engenharias||[]).forEach(e=>{ if(!e.cadastro) e.cadastro = engVazia(e) ? 'em' : 'concluido'; });
   DB.perfis.forEach(pf=>{ if(!pf.admin && !DB.menuPerms[pf.key]) DB.menuPerms[pf.key]=baseMenuPerms(); if(!pf.admin && DB.menuPerms[pf.key].tabelapreco===undefined) DB.menuPerms[pf.key].tabelapreco=true; if(!pf.admin && DB.menuPerms[pf.key].frete===undefined) DB.menuPerms[pf.key].frete=(pf.key==='gestor'); });
   DB.tabelasPreco=Array.isArray(DB.tabelasPreco)?DB.tabelasPreco:[];
   if(!DB.tabelasPreco.length) DB.tabelasPreco=[{id:uid(),nome:'Geral',dados:{}}];
@@ -393,6 +412,7 @@ function gravarLocalAgora(){
   if(hasPending()) journalAgora();
 }
 function save(){
+  try{ engNormalizarAntesDeSalvar(); }catch(e){ try{ console.warn('aprovação engenharia',e); }catch(_){} }
   if(!gravLocal.since) gravLocal.since=Date.now();
   clearTimeout(gravLocal.timer);
   gravLocal.timer=setTimeout(gravarLocalAgora, (Date.now()-gravLocal.since>1000)?0:300);
@@ -937,6 +957,7 @@ function render(){
   if(currentView==='calc') initCalc();
   if(currentView==='simulador') initSim();
   travarConsulta(c);
+  try{ engAtualizarAvisos(); }catch(e){}
   const rb=el('roBadge'); if(rb) rb.style.display=somenteConsulta()?'':'none';
 }
 
@@ -1554,6 +1575,288 @@ function engTocarRevisao(eng){
   const rp=el('engid_revpor'); if(rp) rp.value=eng.revpor;
   const ur=el('engid_ultrev'); if(ur) ur.value=eng.ultrev;
 }
+/* ============================================================
+   APROVAÇÃO DE ALTERAÇÕES DA ENGENHARIA
+   - Perfis com "Alterações na Engenharia precisam de aprovação" (ex.: Desenvolvimento): alterações em
+     ficha CONCLUÍDA ficam pendentes (em vermelho) até um perfil aprovador (PCP/Administrador) aprovar
+     linha a linha (ou devolver com comentário).
+   - eng.aprovado  = versão aprovada (existe só enquanto há pendência). Impressão e custo usam ela.
+   - eng.cadastro  = 'em' (primeiro preenchimento: livre, sem aprovação) | 'concluido'.
+   - eng.devol[item] = {coment, por, em, sig}: item devolvido com comentário.
+   O servidor aplica a mesma regra (o perfil que precisa de aprovação não consegue "aprovar sozinho").
+   ============================================================ */
+function engPrecisaAprovacao(){ if(!SESSION||SESSION.admin) return false; const pf=currentPerfil(); return !!(pf && !pf.admin && pf.engAprovacao && !pf.engAprova); }
+function engPodeAprovar(){ if(!SESSION) return false; if(SESSION.admin) return true; const pf=currentPerfil(); return !!(pf && (pf.admin||pf.engAprova)); }
+function engAlguemPrecisaAprovacao(){ return (DB.perfis||[]).some(pf=>!pf.admin && pf.engAprovacao && !pf.engAprova); }
+function engConteudo(e){ return {blocos:snap(e.blocos||{}), tecidos:snap(e.tecidos||[]), ocultos:snap(e.ocultos||[]), madeiraOrd:e.madeiraOrd||''}; }
+// assinatura de uma linha: ignora id, marcas internas (_pend) e campos vazios
+function engRowSig(r){ const o={}; Object.keys(r||{}).sort().forEach(x=>{ const v=r[x]; if(x==='id'||x[0]==='_'||v===''||v==null||v===false) return; o[x]=v; }); return JSON.stringify(o); }
+function engTecVazio(t){ return !t || (!t.materialId && !t.materialCod && !num(t.consumo)); }
+function engTecSig(t){ return engTecVazio(t) ? '' : JSON.stringify({m:t.materialCod||'',c:String(t.consumo==null?'':t.consumo)}); }
+// "impressão digital" do conteúdo (madeiras e tecidos sem depender da ordem)
+function engNorm(c){
+  const b={}; Object.keys((c&&c.blocos)||{}).sort().forEach(k=>{ let rows=(c.blocos[k]||[]).map(engRowSig); if(k==='madeira') rows=rows.sort(); if(rows.length) b[k]=rows; });
+  const t=((c&&c.tecidos)||[]).filter(x=>!engTecVazio(x)).map(x=>x.classe+'|'+engTecSig(x)).sort();
+  return JSON.stringify({b,t,o:[...((c&&c.ocultos)||[])].sort(),m:(c&&c.madeiraOrd)||''});
+}
+function engVazia(e){ return engNorm(e)===engNorm({}); }
+function engEmCadastro(e){ return !!e && (e.cadastro ? e.cadastro==='em' : engVazia(e)); }
+function engPendente(e){ return !!(e && e.aprovado && engNorm(e)!==engNorm(e.aprovado)); }
+function engGarantirIds(blocos){ if(!blocos) return; for(const k in blocos){ const seen=new Set(); (blocos[k]||[]).forEach(r=>{ if(!r) return; if(r.id==null || seen.has(String(r.id))) r.id=uid(); seen.add(String(r.id)); }); } }
+function engVersaoAprovada(e){ if(!e || !e.aprovado) return e; const v=snap(e); Object.assign(v, snap(e.aprovado)); delete v.aprovado; delete v.devol; return v; }
+function engBaseRec(id){ const cb=cloudBase; if(!cb) return null; if(cb.__strs){ const x=(cb.__strs.engenharias||{})[id]; return x?x.r:null; } return (cb.engenharias||[]).find(e=>e&&e.id===id)||null; }
+// LCS pelo conteúdo + pareamento por posição dentro dos trechos diferentes → [[iA,jB],...]
+function engParearLinhas(A,B){
+  const a=A.map(engRowSig), b=B.map(engRowSig), n=a.length, m=b.length;
+  const L=Array.from({length:n+1},()=>new Array(m+1).fill(0));
+  for(let i=n-1;i>=0;i--) for(let j=m-1;j>=0;j--) L[i][j]= a[i]===b[j]? L[i+1][j+1]+1 : Math.max(L[i+1][j],L[i][j+1]);
+  const iguais=[]; let i=0,j=0; while(i<n&&j<m){ if(a[i]===b[j]){ iguais.push([i,j]); i++; j++; } else if(L[i+1][j]>=L[i][j+1]) i++; else j++; }
+  const pares=[]; let pi=0,pj=0;
+  for(const [ai,bj] of [...iguais,[n,m]]){ const k=Math.min(ai-pi,bj-pj); for(let z=0;z<k;z++) pares.push([pi+z,pj+z]); if(ai<n) pares.push([ai,bj]); pi=ai+1; pj=bj+1; }
+  return pares;
+}
+// Map(índice em B → índice em A) das linhas correspondentes (pelo id; sem id, pelo conteúdo/posição)
+function engMapaLinhas(A,B){
+  const map=new Map(), idxA=new Map(), usadosA=new Set(), soltB=[];
+  A.forEach((r,i)=>{ if(r&&r.id!=null&&!idxA.has(String(r.id))) idxA.set(String(r.id),i); });
+  B.forEach((r,j)=>{ const i=(r&&r.id!=null)?idxA.get(String(r.id)):undefined; if(i!=null && !usadosA.has(i)){ map.set(j,i); usadosA.add(i); } else soltB.push(j); });
+  const soltA=A.map((_,i)=>i).filter(i=>!usadosA.has(i));
+  // linhas sem correspondência pelo id: pareia pelo conteúdo/posição — mas nunca duas linhas que já têm ids
+  // diferentes (são peças distintas: uma excluída e outra incluída)
+  if(soltA.length && soltB.length) engParearLinhas(soltA.map(i=>A[i]), soltB.map(j=>B[j])).forEach(([x,y])=>{ const a=A[soltA[x]], b=B[soltB[y]]; if(a && b && a.id!=null && b.id!=null) return; map.set(soltB[y],soltA[x]); });
+  return map;
+}
+const ENG_LBL_TIPO={novo:'Linha incluída',mod:'Linha alterada',del:'Linha excluída',ordem:'Ordem das linhas alterada',tecNovo:'Tecido incluído',tecMod:'Tecido alterado',tecDel:'Tecido removido',blocoOculto:'Bloco excluído',blocoRestaurado:'Bloco restaurado',ord:'Ordenação das madeiras alterada'};
+function engBlkLabel(k){ const b=ENG_BLOCOS.find(x=>x.key===k); return b?b.label:k; }
+// Lista de alterações pendentes (versão aprovada → versão atual), cada uma aprovável/devolvível
+function engItens(e){
+  if(!engPendente(e)) return [];
+  const ap=e.aprovado, it=[];
+  const keys=[...new Set([...Object.keys(ap.blocos||{}),...Object.keys(e.blocos||{})])];
+  for(const k of keys){
+    const A=(ap.blocos||{})[k]||[], B=(e.blocos||{})[k]||[]; const mp=engMapaLinhas(A,B); const usados=new Set(mp.values()); const ini=it.length;
+    B.forEach((r,j)=>{ const i=mp.get(j); const key='row:'+k+':'+r.id;
+      if(i==null) it.push({key,tipo:'novo',blk:k,j,row:r});
+      else if(engRowSig(A[i])!==engRowSig(r)) it.push({key,tipo:'mod',blk:k,j,iA:i,row:r,antes:A[i]}); });
+    A.forEach((r,i)=>{ if(usados.has(i)) return; let dep=-1; B.forEach((_,j)=>{ const x=mp.get(j); if(x!=null && x<i) dep=j; });
+      it.push({key:'row:'+k+':del:'+(r.id!=null?r.id:('i'+i)),tipo:'del',blk:k,iA:i,antes:r,depoisDe:dep}); });
+    if(it.length===ini && k!=='madeira'){ const seq=B.map((_,j)=>mp.get(j)); if(seq.some((x,j)=>j>0&&x<seq[j-1])) it.push({key:'ordem:'+k,tipo:'ordem',blk:k}); }
+  }
+  const tA=new Map((ap.tecidos||[]).filter(t=>!engTecVazio(t)).map(t=>[t.classe,t])), tB=new Map((e.tecidos||[]).filter(t=>!engTecVazio(t)).map(t=>[t.classe,t]));
+  for(const [c,t] of tB){ const a=tA.get(c); if(!a) it.push({key:'tec:'+c,tipo:'tecNovo',classe:c,row:t}); else if(engTecSig(a)!==engTecSig(t)) it.push({key:'tec:'+c,tipo:'tecMod',classe:c,row:t,antes:a}); }
+  for(const [c,a] of tA) if(!tB.has(c)) it.push({key:'tec:'+c,tipo:'tecDel',classe:c,antes:a});
+  const oA=new Set(ap.ocultos||[]), oB=new Set(e.ocultos||[]);
+  for(const k of new Set([...oA,...oB])) if(oA.has(k)!==oB.has(k)) it.push({key:'oculto:'+k,tipo:oB.has(k)?'blocoOculto':'blocoRestaurado',blk:k});
+  if((ap.madeiraOrd||'')!==(e.madeiraOrd||'')) it.push({key:'ord',tipo:'ord'});
+  return it;
+}
+function engItemSig(it){ return it.tipo+'|'+(it.row?(it.classe!=null?engTecSig(it.row):engRowSig(it.row)):''); }
+function engDevolAtiva(e,it){ const d=e.devol&&e.devol[it.key]; return (d && d.sig===engItemSig(it)) ? d : null; }
+function engLimparDevol(e){ if(!e.devol) return; const its=engItens(e); Object.keys(e.devol).forEach(k=>{ const it=its.find(x=>x.key===k); if(!it || e.devol[k].sig!==engItemSig(it)) delete e.devol[k]; }); if(!Object.keys(e.devol).length) delete e.devol; }
+function engFinalizarPendencia(e){ if(!engPendente(e)){ delete e.aprovado; delete e.aprovPend; delete e.devol; } else engLimparDevol(e); }
+function engDescItem(it){
+  const resumo=r=>{ if(!r) return ''; const blk=ENG_BLOCOS.find(b=>b.key===it.blk); const p=[]; if(r.materialCod) p.push(r.materialCod); if(blk) blk.cols.forEach(c=>{ if(r[c[0]]!=null && r[c[0]]!=='' && r[c[0]]!==false) p.push(c[1]+' '+r[c[0]]); }); return p.join(' · '); };
+  if(it.classe!=null) return `${ENG_LBL_TIPO[it.tipo]} — classe ${it.classe}${it.row?': '+(it.row.materialCod||'—')+' · consumo '+(it.row.consumo||'—'):''}`;
+  if(it.tipo==='ord') return ENG_LBL_TIPO.ord;
+  if(it.tipo==='ordem'||it.tipo==='blocoOculto'||it.tipo==='blocoRestaurado') return `${ENG_LBL_TIPO[it.tipo]} — ${engBlkLabel(it.blk)}`;
+  return `${ENG_LBL_TIPO[it.tipo]} — ${engBlkLabel(it.blk)}: ${resumo(it.row||it.antes)}`;
+}
+// Aplica um item na VERSÃO APROVADA (aprovar)
+function engItemNaAprovada(e,it){
+  const ap=e.aprovado; ap.blocos=ap.blocos||{};
+  if(it.blk && (it.tipo==='novo'||it.tipo==='mod'||it.tipo==='del'||it.tipo==='ordem')){
+    const A=ap.blocos[it.blk]||(ap.blocos[it.blk]=[]), B=(e.blocos||{})[it.blk]||[]; const mp=engMapaLinhas(A,B);
+    if(it.tipo==='mod') A[it.iA]=snap(it.row);
+    else if(it.tipo==='del') A.splice(it.iA,1);
+    else if(it.tipo==='novo'){ let pos=0; for(let j=it.j-1;j>=0;j--){ const x=mp.get(j); if(x!=null){ pos=x+1; break; } } A.splice(pos,0,snap(it.row)); }
+    else { const usados=new Set(); const nova=[]; B.forEach((_,j)=>{ const x=mp.get(j); if(x!=null){ nova.push(A[x]); usados.add(x); } }); A.forEach((r,i)=>{ if(!usados.has(i)) nova.push(r); }); ap.blocos[it.blk]=nova; }
+  } else if(it.classe!=null){ ap.tecidos=(ap.tecidos||[]).filter(t=>t.classe!==it.classe || engTecVazio(t)); if(it.row){ const i=(ap.tecidos).findIndex(t=>t.classe===it.classe); if(i>=0) ap.tecidos[i]=snap(it.row); else ap.tecidos.push(snap(it.row)); } }
+  else if(it.tipo==='blocoOculto'){ ap.ocultos=[...new Set([...(ap.ocultos||[]),it.blk])]; }
+  else if(it.tipo==='blocoRestaurado'){ ap.ocultos=(ap.ocultos||[]).filter(k=>k!==it.blk); }
+  else if(it.tipo==='ord'){ ap.madeiraOrd=e.madeiraOrd||''; }
+}
+// Volta um item da versão ATUAL para o aprovado (desfazer)
+function engItemDesfazer(e,it){
+  const ap=e.aprovado;
+  if(it.blk && (it.tipo==='novo'||it.tipo==='mod'||it.tipo==='del'||it.tipo==='ordem')){
+    const A=(ap.blocos||{})[it.blk]||[]; const B=engBlock(e,it.blk); const mp=engMapaLinhas(A,B);
+    if(it.tipo==='mod') B[it.j]={...snap(it.antes), id:B[it.j].id};
+    else if(it.tipo==='novo') B.splice(it.j,1);
+    else if(it.tipo==='del'){ const r=snap(it.antes); if(r.id==null) r.id=uid(); B.splice(it.depoisDe+1,0,r); }
+    else { const ord=B.map((r,j)=>({r,x:mp.has(j)?mp.get(j):1e9})).sort((p,q)=>p.x-q.x).map(p=>p.r); e.blocos[it.blk]=ord; }
+  } else if(it.classe!=null){ e.tecidos=e.tecidos||[]; const i=e.tecidos.findIndex(t=>t.classe===it.classe);
+    if(it.antes){ if(i>=0) e.tecidos[i]=snap(it.antes); else e.tecidos.push(snap(it.antes)); } else if(i>=0) e.tecidos.splice(i,1); }
+  else if(it.tipo==='blocoOculto'){ e.ocultos=(e.ocultos||[]).filter(k=>k!==it.blk); }
+  else if(it.tipo==='blocoRestaurado'){ e.ocultos=[...new Set([...(e.ocultos||[]),it.blk])]; }
+  else if(it.tipo==='ord'){ e.madeiraOrd=ap.madeiraOrd||''; engOrdenaMadeiraArr(e); }
+}
+function engFicha(id){ return DB.engenharias.find(x=>x.id===id); }
+function engHist(acao,e,txt){ DB.historico.push({id:uid(),user:SESSION.nome,acao,campo:`${e.sku||e.item||'—'} · ${e.tamanho||'—'}`,ant:'—',novo:txt,data:new Date().toISOString()}); }
+function engAprovarItem(id,key){
+  key=decodeURIComponent(key);
+  if(!engPodeAprovar()) return; const e=engFicha(id); if(!e) return; const it=engItens(e).find(x=>x.key===key); if(!it) return;
+  engItemNaAprovada(e,it); engFinalizarPendencia(e); engHist('Engenharia: alteração aprovada',e,engDescItem(it)); save(); render();
+}
+function engAprovarTudo(id){
+  if(!engPodeAprovar()) return; const e=engFicha(id); if(!e) return; const its=engItens(e); if(!its.length) return;
+  if(!confirm(`Aprovar as ${its.length} alteração(ões) pendentes desta ficha (${e.sku||''} · ${e.tamanho||''})?`)) return;
+  delete e.aprovado; delete e.aprovPend; delete e.devol; engHist('Engenharia: todas as alterações aprovadas',e,its.length+' alteração(ões)'); save(); render();
+}
+function engDevolverItem(id,key){
+  key=decodeURIComponent(key);
+  if(!engPodeAprovar()) return; const e=engFicha(id); if(!e) return; const it=engItens(e).find(x=>x.key===key); if(!it) return;
+  const c=prompt('Devolver para correção — escreva o motivo/comentário:\n\n'+engDescItem(it),''); if(c===null) return;
+  if(!c.trim()){ alert('Escreva um comentário para devolver.'); return; }
+  e.devol=e.devol||{}; e.devol[key]={coment:c.trim(),por:SESSION.nome,em:new Date().toISOString(),sig:engItemSig(it)};
+  engHist('Engenharia: alteração devolvida',e,engDescItem(it)+' — "'+c.trim()+'"'); save(); render();
+}
+function engDesfazerItem(id,key){
+  key=decodeURIComponent(key);
+  if(!can('editar')) return; const e=engFicha(id); if(!e) return; const it=engItens(e).find(x=>x.key===key); if(!it) return;
+  if(!confirm('Desfazer esta alteração e voltar à versão aprovada?\n\n'+engDescItem(it))) return;
+  engItemDesfazer(e,it); if(e.devol) delete e.devol[key]; engFinalizarPendencia(e); engTocarRevisao(e); engHist('Engenharia: alteração desfeita',e,engDescItem(it)); save(); render();
+}
+function engConcluirCadastro(todos){
+  const e=engCurrent(); if(!e||!can('editar')) return;
+  const fichas = (todos && e.produtoId) ? DB.engenharias.filter(x=>x.produtoId===e.produtoId && engEmCadastro(x)) : [e];
+  if(!confirm(`Concluir o cadastro de ${fichas.length>1?fichas.length+' fichas (todos os tamanhos)':'esta ficha'}?\nA partir daí, alterações de perfis que precisam de aprovação ficarão pendentes até o PCP/Administrador aprovar.`)) return;
+  fichas.forEach(x=>{ x.cadastro='concluido'; x.cadastroConcluidoPor=SESSION.nome; x.cadastroConcluidoEm=new Date().toISOString(); engHist('Engenharia: cadastro concluído',x,'ficha concluída'); });
+  save(); cloudPush(true); render();
+}
+let engModoAprovado=false, engModoTemp=false;
+function engVerAprovada(v){ engModoAprovado=!!v; engModoTemp=false; render(); }
+/* ---- normalização a cada salvamento ---- */
+// Perfil que precisa de aprovação: a versão aprovada é sempre a que está no banco (não dá para mudá-la).
+function engNormalizarDev(e){
+  const b=engBaseRec(e.id);
+  if(!b || engEmCadastro(b) || engEmCadastro(e)){ return; }     // primeiro cadastro: sem aprovação
+  engGarantirIds(e.blocos);
+  const baseline=b.aprovado || engConteudo(b);
+  if(engNorm(e)===engNorm(baseline)){ delete e.aprovado; delete e.aprovPend; delete e.devol; return; }
+  if(!e.aprovado || engNorm(e.aprovado)!==engNorm(baseline)) e.aprovado=snap(baseline);
+  if(!e.aprovPend) e.aprovPend={por:SESSION.nome, em:new Date().toISOString()};
+  engLimparDevol(e);
+}
+// Aprovador editando ficha com pendências: o que ELE muda vale direto (entra na versão aprovada);
+// as pendências de outros continuam pendentes.
+let engUltimoVisto={};
+function engMarcarVisto(e){ if(e) engUltimoVisto[e.id]=engConteudo(e); }
+function engAplicarEdicoesDoAprovador(e){
+  const b=engUltimoVisto[e.id]; engUltimoVisto[e.id]=engConteudo(e);
+  if(!e.aprovado || !b || engNorm(b)===engNorm(e)) return;
+  engGarantirIds(e.blocos);
+  const ap=e.aprovado; ap.blocos=ap.blocos||{};
+  for(const k of new Set([...Object.keys(b.blocos||{}),...Object.keys(e.blocos||{})])){
+    const Bs=(b.blocos||{})[k]||[], L=(e.blocos||{})[k]||[];
+    if(JSON.stringify(Bs.map(engRowSig))===JSON.stringify(L.map(engRowSig))) continue;
+    let Ap=ap.blocos[k]||(ap.blocos[k]=[]);
+    const mLB=engMapaLinhas(Bs,L), mLA=engMapaLinhas(Ap,L), mBA=engMapaLinhas(Ap,Bs), usadosB=new Set(mLB.values());
+    L.forEach((r,j)=>{ const bi=mLB.get(j), ai=mLA.get(j); if(bi!=null && ai!=null && engRowSig(Bs[bi])!==engRowSig(r) && engRowSig(Ap[ai])===engRowSig(Bs[bi])) Ap[ai]=snap(r); });
+    const rem=[]; Bs.forEach((r,i)=>{ if(usadosB.has(i)) return; const ai=mBA.get(i); if(ai!=null && engRowSig(Ap[ai])===engRowSig(r)) rem.push(ai); });
+    rem.sort((x,y)=>y-x).forEach(ai=>Ap.splice(ai,1));
+    L.forEach((r,j)=>{ if(mLB.get(j)!=null) return; const m2=engMapaLinhas(Ap,L); if(m2.get(j)!=null) return;
+      let pos=0; for(let jj=j-1;jj>=0;jj--){ const x=m2.get(jj); if(x!=null){ pos=x+1; break; } } Ap.splice(pos,0,snap(r)); });
+  }
+  const tb=new Map((b.tecidos||[]).map(t=>[t.classe,t])), te=new Map((e.tecidos||[]).map(t=>[t.classe,t]));
+  for(const c of new Set([...tb.keys(),...te.keys()])){ const bt=tb.get(c), lt=te.get(c); if(engTecSig(bt)===engTecSig(lt)) continue;
+    const at=(ap.tecidos||[]).find(t=>t.classe===c); if(engTecSig(at)!==engTecSig(bt)) continue;
+    ap.tecidos=(ap.tecidos||[]).filter(t=>t.classe!==c); if(lt) ap.tecidos.push(snap(lt)); }
+  const ob=new Set(b.ocultos||[]), oe=new Set(e.ocultos||[]), oa=new Set(ap.ocultos||[]);
+  for(const k of new Set([...ob,...oe])) if(ob.has(k)!==oe.has(k) && oa.has(k)===ob.has(k)){ if(oe.has(k)) oa.add(k); else oa.delete(k); }
+  ap.ocultos=[...oa];
+  if((b.madeiraOrd||'')!==(e.madeiraOrd||'') && (ap.madeiraOrd||'')===(b.madeiraOrd||'')) ap.madeiraOrd=e.madeiraOrd||'';
+  engFinalizarPendencia(e);
+}
+function engNormalizarAntesDeSalvar(){
+  if(!SESSION || !DB.engenharias || somenteConsulta()) return;
+  const dev=engPrecisaAprovacao(), apr=engPodeAprovar(); if(!dev && !apr) return;
+  const cur=engCurrent(); if(!cur) return;
+  const grupo = cur.produtoId ? DB.engenharias.filter(e=>e.produtoId===cur.produtoId) : [cur];
+  grupo.forEach(e=>{ if(dev) engNormalizarDev(e); else engAplicarEdicoesDoAprovador(e); });
+}
+/* ---- avisos: contador no menu + janela quando chega pendência/devolução nova ---- */
+function engPendenciasResumo(){
+  const fichas=DB.engenharias.filter(e=>engPendente(e)).map(e=>({e,its:engItens(e)})).filter(x=>x.its.length);
+  const devolvidas=[]; fichas.forEach(({e,its})=>its.forEach(it=>{ const d=engDevolAtiva(e,it); if(d) devolvidas.push({e,it,d}); }));
+  return {fichas, devolvidas, nItens:fichas.reduce((a,x)=>a+x.its.length,0)};
+}
+let engNotifVistos=null, engNotifUlt=0;
+function engAtualizarAvisos(){
+  if(!SESSION || !DB.engenharias) return;
+  const apr=engPodeAprovar(), dev=engPrecisaAprovacao(); if(!apr && !dev){ engBadge(0); return; }
+  const r=engPendenciasResumo();
+  engBadge(apr ? r.nItens : r.devolvidas.length);
+  const chaves = apr ? r.fichas.flatMap(({e,its})=>its.map(it=>e.id+'|'+it.key))
+                     : r.devolvidas.map(x=>x.e.id+'|'+x.it.key+'|'+x.d.em);
+  if(engNotifVistos===null){ engNotifVistos=new Set(chaves); return; }  // ao entrar: não abre janela
+  const novas=chaves.filter(k=>!engNotifVistos.has(k)); chaves.forEach(k=>engNotifVistos.add(k));
+  if(!novas.length) return;
+  if(!el('engNotif') && Date.now()-engNotifUlt<120000) return; // acabou de avisar: fica só o contador
+  const ids=new Set(novas.map(k=>k.split('|')[0]));
+  if(apr){ const fs=r.fichas.filter(x=>ids.has(x.e.id) && !(x.e.aprovPend && x.e.aprovPend.por===SESSION.nome)); if(fs.length) engNotifModal('apr',fs); }
+  else { const ds=r.devolvidas.filter(x=>ids.has(x.e.id) && x.d.por!==SESSION.nome); if(ds.length) engNotifModal('dev',ds); }
+}
+function engBadge(n){ const b=document.querySelector('#nav button[data-view="engenharia"]'); if(!b) return; let s=b.querySelector('.nav-badge');
+  if(!n){ if(s) s.remove(); return; } if(!s){ s=document.createElement('span'); s.className='nav-badge'; b.appendChild(s); } s.textContent=n; }
+function engNotifModal(tipo,lista){
+  const box=el('engNotif'); if(box) box.remove();
+  const d=document.createElement('div'); d.id='engNotif'; d.className='modal-bg'; d.style.zIndex='9000';
+  const linhas = tipo==='apr'
+    ? lista.map(({e,its})=>`<div class="eng-notif-item"><div><b>${e.sku||'—'} · ${e.item||''}</b> · tamanho <b>${e.tamanho||'—'}</b><div class="muted" style="font-size:12px">${its.length} alteração(ões)${e.aprovPend?` · por ${e.aprovPend.por}`:''}</div></div><button class="btn sm primary" onclick="engNotifAbrir('${e.id}')">Ver</button></div>`).join('')
+    : lista.map(({e,it,d})=>`<div class="eng-notif-item"><div><b>${e.sku||'—'} · ${e.tamanho||'—'}</b><div style="font-size:12.5px">${engDescItem(it)}</div><div style="font-size:12.5px;color:var(--red)">💬 ${d.por}: “${d.coment}”</div></div><button class="btn sm primary" onclick="engNotifAbrir('${e.id}')">Ver</button></div>`).join('');
+  d.innerHTML=`<div class="modal" style="width:540px"><div class="modal-hd"><div><h3>${tipo==='apr'?'🔴 Novas alterações de engenharia aguardando aprovação':'↩ Alterações devolvidas para correção'}</h3></div><button class="btn sm" onclick="el('engNotif').remove()">✕</button></div>
+    <div class="modal-bd">${linhas}</div><div class="modal-ft"><button class="btn" onclick="el('engNotif').remove()">Depois</button></div></div>`;
+  document.body.appendChild(d); engNotifUlt=Date.now();
+}
+let ENG_ITENS=[];
+function engEsc(t){ return String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+function engDataHora(iso){ try{ return new Date(iso).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); }catch(e){ return ''; } }
+function engAcoesHTML(id,it){
+  const k=encodeURIComponent(it.key); let h='';
+  if(engPodeAprovar()) h+=`<button class="btn sm primary" title="Aprovar esta alteração" onclick="engAprovarItem('${id}','${k}')">✔</button> <button class="btn sm" title="Devolver para correção, com comentário" onclick="engDevolverItem('${id}','${k}')">↩</button> `;
+  if(can('editar')) h+=`<button class="btn sm" title="Desfazer: voltar ao que está aprovado" onclick="engDesfazerItem('${id}','${k}')">⟲</button>`;
+  return h;
+}
+function engDevolHTML(e,it,ncol){ const d=engDevolAtiva(e,it); if(!d) return '';
+  return `<tr class="eng-devol no-print"><td colspan="${ncol}">💬 <b>Devolvido por ${engEsc(d.por)}</b> (${engDataHora(d.em)}): “${engEsc(d.coment)}” <span class="muted">— corrija a linha (volta para aprovação) ou clique ⟲ para desfazer.</span></td></tr>`; }
+function engCampoMudou(a,b,k){ const n=v=>(v==null||v===false)?'':String(v); return n(a&&a[k])!==n(b&&b[k]); }
+function engMarcaTd(h,antes){ if(/^<td[^>]*\btitle=/.test(h)) return h; return h.replace(/^<td/, `<td data-aprov="1" title="Antes: ${engEsc(antes==null||antes===''||antes===false?'(vazio)':antes)}"`); }
+function engBannerHTML(eng,itens){
+  if(!eng) return '';
+  if(engModoAprovado && eng.aprovado) return `<div class="card no-print eng-banner" style="margin-bottom:14px"><div class="bd row" style="justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center"><div><b>👁 Mostrando a VERSÃO APROVADA</b> <span class="muted">— é a que sai na impressão e vai para a Precificação (somente leitura).</span></div><button class="btn sm" onclick="engVerAprovada(false)">Voltar para a versão com alterações</button></div></div>`;
+  if(engEmCadastro(eng)){
+    if(!engAlguemPrecisaAprovacao()) return '';
+    const irm=eng.produtoId?DB.engenharias.filter(x=>x.produtoId===eng.produtoId && engEmCadastro(x)).length:1;
+    return `<div class="card no-print eng-banner-cad" style="margin-bottom:14px"><div class="bd row" style="justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center">
+      <div><b>📝 Ficha em cadastro</b> <span class="muted">— primeiro preenchimento: as alterações valem na hora, sem aprovação. Ao terminar, conclua o cadastro; a partir daí, alterações de perfis que precisam de aprovação passam pelo PCP/Administrador.</span></div>
+      ${can('editar')?`<div class="row" style="gap:6px"><button class="btn sm primary" onclick="engConcluirCadastro(false)">✔ Concluir cadastro</button>${irm>1?`<button class="btn sm" onclick="engConcluirCadastro(true)">✔ Concluir todos os tamanhos (${irm})</button>`:''}</div>`:''}</div></div>`;
+  }
+  if(itens.length){
+    const p=eng.aprovPend, devs=itens.filter(it=>engDevolAtiva(eng,it)).length;
+    const estrut=itens.filter(it=>it.classe==null && !['novo','mod','del'].includes(it.tipo));
+    return `<div class="card no-print eng-banner" style="margin-bottom:14px"><div class="bd">
+      <div class="row" style="justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center">
+        <div><b style="color:#c0392b">🔴 ${itens.length} alteração(ões) aguardando aprovação</b>${p?` <span class="muted">· enviadas por ${engEsc(p.por)} em ${engDataHora(p.em)}</span>`:''}${devs?` · <b style="color:#b9770e">${devs} devolvida(s)</b>`:''}
+          <div class="muted" style="font-size:12.5px;margin-top:2px">Em vermelho = alterado (passe o mouse para ver o valor antigo). Até a aprovação, a <b>impressão</b> e o <b>custo na Precificação</b> usam a versão aprovada.</div></div>
+        <div class="row" style="gap:6px">${engPodeAprovar()?`<button class="btn sm primary" onclick="engAprovarTudo('${eng.id}')">✔ Aprovar tudo</button>`:''}<button class="btn sm" onclick="engVerAprovada(true)">👁 Ver versão aprovada</button></div>
+      </div>
+      ${estrut.length?`<table style="margin-top:10px"><tbody>${estrut.map(it=>{ const d=engDevolAtiva(eng,it); return `<tr><td style="color:#c0392b;font-weight:600">${engEsc(engDescItem(it))}${d?`<div style="color:var(--text);font-weight:400;font-size:12.5px">💬 ${engEsc(d.por)}: “${engEsc(d.coment)}”</div>`:''}</td><td class="eng-aprov-acoes">${engAcoesHTML(eng.id,it)}</td></tr>`; }).join('')}</tbody></table>`:''}
+    </div></div>`;
+  }
+  if(engPrecisaAprovacao()) return `<div class="no-print muted" style="font-size:12.5px;margin:-6px 0 12px">🔒 Cadastro desta ficha já foi concluído: suas alterações ficarão em vermelho até o PCP/Administrador aprovar.</div>`;
+  return '';
+}
+function engListaPendenciasHTML(){
+  const apr=engPodeAprovar(), dev=engPrecisaAprovacao(); if(!apr && !dev) return '';
+  const r=engPendenciasResumo();
+  if(apr && r.fichas.length) return `<div class="card no-print eng-banner" style="margin-bottom:14px"><div class="hd"><div><h3>🔴 Aguardando aprovação</h3><div class="desc">${r.nItens} alteração(ões) em ${r.fichas.length} ficha(s)</div></div></div>
+    <div class="bd" style="padding:0;overflow:auto"><table><tbody>${r.fichas.map(({e,its})=>{ const dv=its.filter(it=>engDevolAtiva(e,it)).length; return `<tr><td><b>${engEsc(e.sku||'—')}</b> · ${engEsc(e.item||'')} · tamanho <b>${engEsc(e.tamanho||'—')}</b></td><td>${its.length} alteração(ões)${dv?` · <span style="color:#b9770e">${dv} devolvida(s)</span>`:''}</td><td class="muted">${e.aprovPend?engEsc(e.aprovPend.por)+' · '+engDataHora(e.aprovPend.em):''}</td><td style="text-align:right"><button class="btn sm ${e.id===engSel?'':'primary'}" onclick="engSelId('${e.id}')">${e.id===engSel?'aberta':'Abrir'}</button></td></tr>`; }).join('')}</tbody></table></div></div>`;
+  if(dev && r.devolvidas.length) return `<div class="card no-print" style="margin-bottom:14px;border:2px solid #e8a317"><div class="hd"><div><h3>↩ Devolvidas para correção</h3><div class="desc">${r.devolvidas.length} alteração(ões) devolvida(s) pelo PCP/Administrador</div></div></div>
+    <div class="bd" style="padding:0;overflow:auto"><table><tbody>${r.devolvidas.map(({e,it,d})=>`<tr><td><b>${engEsc(e.sku||'—')}</b> · ${engEsc(e.tamanho||'—')}<div style="font-size:12.5px">${engEsc(engDescItem(it))}</div></td><td style="font-size:12.5px">💬 <b>${engEsc(d.por)}</b>: “${engEsc(d.coment)}”</td><td style="text-align:right"><button class="btn sm primary" onclick="engSelId('${e.id}')">Abrir</button></td></tr>`).join('')}</tbody></table></div></div>`;
+  return '';
+}
+function engNotifAbrir(id){ const b=el('engNotif'); if(b) b.remove(); engSel=id; engModoAprovado=false; nav('engenharia'); }
+
 /* ---- custo automático via matéria-prima ---- */
 function matById(id){ return DB.materiais.find(m=>m.id===id); }
 function matPreco(id){ const m=id?matById(id):null; if(!m) return 0; const p=num(m.precoNota); return (m.converter && num(m.fatorConversao)>0) ? p/num(m.fatorConversao) : p; }
@@ -1570,7 +1873,7 @@ function engEnsureFichas(pid){
   const tecidos=[...new Set(prod.variacoes.map(v=>v.tecido).filter(t=>t&&t!=='—'))];
   tamanhos.forEach(tz=>{
     if(!DB.engenharias.some(e=>e.produtoId===pid && e.tamanho===tz)){
-      const eng={id:uid(),produtoId:pid,sku:prod.codigo,item:prod.modelo,tamanho:tz,pedido:'',lote:'',revpor:'',criacao:new Date().toLocaleDateString('pt-BR'),ultrev:'',blocos:{},
+      const eng={id:uid(),cadastro:'em',produtoId:pid,sku:prod.codigo,item:prod.modelo,tamanho:tz,pedido:'',lote:'',revpor:'',criacao:new Date().toLocaleDateString('pt-BR'),ultrev:'',blocos:{},
         tecidos:tecidos.map(c=>({classe:c,materialCod:'',materialId:null,consumo:''}))};
       ENG_BASE.forEach(b=>eng.blocos[b.key]=[]);
       DB.engenharias.push(eng);
@@ -1591,9 +1894,17 @@ function viewEngenharia(){
   }
   let eng=engCurrent();
   if(eng && eng.produtoId) engSeedVazias(eng.produtoId); // puxa a composição do 1º tamanho para os vazios
+  if(eng) engGarantirIds(eng.blocos);
+  const modoAprov = !!(eng && engModoAprovado && eng.aprovado);
+  if(!modoAprov) engModoAprovado=false;
+  const ev = modoAprov ? engVersaoAprovada(eng) : eng;      // o que é mostrado (versão aprovada na impressão)
+  const editavelF = editavel && !modoAprov;
+  ENG_ITENS = (eng && !modoAprov) ? engItens(eng) : [];
+  const pendProd=new Set(DB.engenharias.filter(e=>e.aprovado && engPendente(e)).map(e=>e.produtoId));
   const curVal = eng ? (eng.produtoId?('P:'+eng.produtoId):('S:'+engSkuKey(eng))) : '';
   const irmaos = eng ? (eng.produtoId?DB.engenharias.filter(e=>e.produtoId===eng.produtoId):DB.engenharias.filter(e=>!e.produtoId&&engSkuKey(e)===engSkuKey(eng))) : [];
-  const opts = produtos.map(p=>`<option value="P:${p.id}" ${curVal==='P:'+p.id?'selected':''}>${p.codigo} — ${p.modelo}</option>`).join('')
+  irmaos.forEach(engMarcarVisto);
+  const opts = produtos.map(p=>`<option value="P:${p.id}" ${curVal==='P:'+p.id?'selected':''}>${pendProd.has(p.id)?'🔴 ':''}${p.codigo} — ${p.modelo}</option>`).join('')
     + orphanSkus.map(s=>`<option value="S:${s}" ${curVal==='S:'+s?'selected':''}>${s} (importada)</option>`).join('');
   let h=`<div class="eng-sticky"><div class="card no-print" style="margin-bottom:14px"><div class="bd">
     <div class="row" style="justify-content:space-between;gap:14px;flex-wrap:wrap;align-items:flex-end">
@@ -1602,7 +1913,7 @@ function viewEngenharia(){
           <select class="inp" id="engProdSel" onchange="engSelGroup(this.value)">${opts||'<option>— nenhum —</option>'}</select></div>
         ${editavel?`<input type="file" id="engFile" accept=".xlsx,.xls" style="display:none" onchange="engImportarExcel(this)">
         <button class="btn sm" onclick="el('engFile').click()">⬆ Importar Excel</button>`:''}
-        ${editavel&&eng?`<button class="btn sm danger" onclick="engExcluir()">🗑 Excluir</button>`:''}
+        ${editavel&&eng&&!(engPrecisaAprovacao()&&!engEmCadastro(eng))?`<button class="btn sm danger" onclick="engExcluir()">🗑 Excluir</button>`:''}
       </div>
       ${eng?`<div class="row">
         <button class="btn sm" onclick="engMarcarTodos(true)">Marcar todos</button>
@@ -1615,24 +1926,26 @@ function viewEngenharia(){
   h+=`<div class="row no-print" style="align-items:center;gap:12px;margin-bottom:16px">
     <span class="muted" style="font-size:12.5px">Tamanhos deste SKU:</span>
     <div class="sub-tabs" style="margin:0;flex-wrap:wrap">
-      ${irmaos.map(e=>`<button class="${e.id===engSel?'active':''}" onclick="engSelId('${e.id}')">${e.tamanho||'sem tamanho'}</button>`).join('')}
+      ${irmaos.map(e=>`<button class="${e.id===engSel?'active':''}" onclick="engSelId('${e.id}')">${e.tamanho||'sem tamanho'}${engPendente(e)?'<span class="eng-dot" title="Alterações aguardando aprovação"></span>':''}</button>`).join('')}
     </div>
     ${editavel&&eng.produtoId&&irmaos.length>1?`<button class="btn primary sm" onclick="engReplicarComposicao()" title="Copia toda a composição deste tamanho para os demais; depois você ajusta dimensões e quantidades em cada um">↧ Replicar composição p/ os demais tamanhos</button>
     <button class="btn sm" onclick="engAplicarPadroes()" title="Copia apenas os itens marcados como Padrão para as fichas dos outros tamanhos">↧ Só itens padrão</button>`:''}
   </div></div>`;
+  h+=engListaPendenciasHTML();
+  h+=engBannerHTML(eng, ENG_ITENS);
   h+=`<div class="card no-print" style="margin-bottom:18px"><div class="hd"><div><h3>${eng.item||'—'} <span class="tag blue">${eng.sku||'SKU'}</span></h3><div class="desc">Composição do tamanho <b>${eng.tamanho||'—'}</b> · custo automático pela matéria-prima</div></div></div>
     <div class="bd"><div class="grid g-3">
     ${ENG_IDENT.map(([f,l])=>{ const auto=(f==='revpor'||f==='ultrev'); const attrs=auto?'readonly':(`oninput="engField('${f}',this.value)"`+(editavel?'':' disabled')); return `<div class="field"><label>${l}${auto?' <span class="muted">(auto)</span>':''}</label><input class="inp" id="engid_${f}" value="${(eng[f]||'').toString().replace(/"/g,'&quot;')}" ${attrs}></div>`; }).join('')}
   </div></div></div>`;
   h+=`<datalist id="engMatList">${DB.materiais.map(m=>`<option value="${m.codigo} · ${m.descricao}"></option>`).join('')}</datalist>`;
   if(!DB.materiais.length) h+=`<div class="card no-print" style="margin-bottom:14px"><div class="bd muted">💡 Cadastre insumos com preço na aba <b>Matéria-Prima</b> para o custo ser calculado automaticamente.</div></div>`;
-  h+=ENG_BASE.filter(b=>engVisivel(eng,b.key)).map((blk,i)=>engBlockCard(eng,blk,i,editavel)).join('');
-  const ocultos=ENG_BASE.filter(b=>!engVisivel(eng,b.key));
-  if(editavel && ocultos.length) h+=`<div class="card no-print" style="margin-bottom:18px"><div class="bd row" style="gap:8px;flex-wrap:wrap;align-items:center"><span class="muted" style="font-size:12.5px">Blocos excluídos (clique para restaurar):</span>${ocultos.map(b=>`<button class="btn sm" onclick="engRestaurarBloco('${b.key}')">＋ ${b.label}</button>`).join('')}</div></div>`;
-  h+=engTecidoCard(eng,editavel);
-  h+=`<div class="card eng-block" id="engblock_rollup"><div id="engRollup">${engRollupHTML(eng)}</div></div>`;
-  h+=engMateriaisCard(eng);
-  engAutoFeed(eng); save(); // mantém o custo das variações na Precificação sempre atualizado
+  h+=ENG_BASE.filter(b=>engVisivel(ev,b.key)).map((blk,i)=>engBlockCard(ev,blk,i,editavelF)).join('');
+  const ocultos=ENG_BASE.filter(b=>!engVisivel(ev,b.key));
+  if(editavelF && ocultos.length) h+=`<div class="card no-print" style="margin-bottom:18px"><div class="bd row" style="gap:8px;flex-wrap:wrap;align-items:center"><span class="muted" style="font-size:12.5px">Blocos excluídos (clique para restaurar):</span>${ocultos.map(b=>`<button class="btn sm" onclick="engRestaurarBloco('${b.key}')">＋ ${b.label}</button>`).join('')}</div></div>`;
+  h+=engTecidoCard(ev,editavelF);
+  h+=`<div class="card eng-block" id="engblock_rollup"><div id="engRollup">${engRollupHTML(ev)}</div></div>`;
+  h+=engMateriaisCard(ev);
+  engAutoFeed(engVersaoAprovada(eng)); save(); // custo na Precificação = versão APROVADA da ficha
   return h;
 }
 function engCellFor(eng,blk,r,i,c,editavel){
@@ -1658,20 +1971,30 @@ function engBlockCard(eng,blk,idx,editavel){
   const isMad=blk.key==='madeira';
   const moldeTh=isMad?'<th class="col-molde" title="Marque as linhas que são molde: vão para o fim da lista e saem destacadas na impressão">Molde</th>':'';
   const th=(blk.matFirst?matTh+unTh+colsTh:colsTh+matTh+unTh)+moldeTh+'<th class="no-print" title="Marque para valer em todos os tamanhos">Padrão</th>';
+  // aprovação: alterações pendentes desta ficha neste bloco
+  const itB=(eng===engCurrent()) ? ENG_ITENS.filter(x=>x.blk===blk.key && (x.tipo==='novo'||x.tipo==='mod'||x.tipo==='del')) : [];
+  const temCol=itB.length>0;
+  const ncolTot=blk.cols.length+2+(isMad?1:0)+1+(editavel?1:0)+(temCol?1:0);
+  const delRow=it=>`<tr class="eng-aprov-del"><td colspan="${ncolTot-1}"><span class="riscado">🗑 ${engEsc(engDescItem(it))}</span> <span class="muted">(exclusão aguardando aprovação)</span></td><td class="no-print eng-aprov-acoes">${engAcoesHTML(eng.id,it)}</td></tr>`+engDevolHTML(eng,it,ncolTot);
+  const dels=j=>itB.filter(x=>x.tipo==='del' && x.depoisDe===j).map(delRow).join('');
   // Zebra por densidade (espumas): cada densidade distinta alterna faixa — listrado na impressão P&B
   let zebra=null;
   if(blk.key==='espumas'){ zebra={}; [...new Set(rows.map(x=>(x.ref||'').trim()))].forEach((rf,idx)=>{ zebra[rf]=idx%2; }); }
-  const body=rows.map((r,i)=>{
-    const colsCells=blk.cols.map(c=>engCellFor(eng,blk,r,i,c,editavel)).join('');
+  const body=dels(-1)+rows.map((r,i)=>{
+    const it=itB.find(x=>x.j===i && x.tipo!=='del');
+    const mk=(h,k)=>(it && it.tipo==='mod' && engCampoMudou(it.antes,r,k)) ? engMarcaTd(h,it.antes[k]) : h;
+    const colsCells=blk.cols.map(c=>mk(engCellFor(eng,blk,r,i,c,editavel),c[0])).join('');
     const mc=`<td class="col-mat" style="min-width:160px"><input class="inp" list="engMatList" ${(blk.key==='madeira'||blk.key==='espumas')&&i>0&&rows[i-1].materialCod?`placeholder="sugestão: ${(rows[i-1].materialCod||'').replace(/"/g,'&quot;')}" onfocus="engSugereMat('${blk.key}',${i},this)"`:'placeholder="buscar insumo"'} value="${(r.materialCod||'').replace(/"/g,'&quot;')}" onchange="onEngPickMat('${blk.key}',${i},this)" ${editavel?'':'disabled'}></td>`;
+    const mcM=mk(mc,'materialCod');
     const un=`<td class="muted col-un" id="engun_${blk.key}_${i}" style="text-align:center;white-space:nowrap;font-weight:600">${(engMatUnid(r)||'—').toString().replace(/</g,'&lt;')}</td>`;
     const pad=`<td class="no-print" style="text-align:center"><input type="checkbox" title="Padrão para todos os tamanhos" ${r.padrao?'checked':''} onchange="onEngPadrao('${blk.key}',${i},this)" ${editavel?'':'disabled'}></td>`;
     const del=editavel?`<td class="no-print" style="white-space:nowrap">${r._pend?`<button class="btn sm" title="Conferir (tirar destaque vermelho)" onclick="engConferirLinha('${blk.key}',${i})">✓</button> `:''}<button class="btn sm danger" onclick="engDelRow('${blk.key}',${i})">✕</button></td>`:'';
     const molde=isMad?`<td class="col-molde" style="text-align:center"><input type="checkbox" class="no-print" title="Esta linha é molde" ${r.molde?'checked':''} onchange="onEngMolde(${i},this)" ${editavel?'':'disabled'}>${r.molde?'<span class="print-only molde-tag">MOLDE</span>':''}</td>`:'';
     const cls=[]; if(zebra && zebra[(r.ref||'').trim()]) cls.push('zebra'); if(r._pend) cls.push('eng-pend'); if(isMad && r.molde) cls.push('eng-molde');
     const clsAttr=cls.length?` class="${cls.join(' ')}"`:'';
-    const sep=(isMad && r.molde && !(i>0 && rows[i-1].molde))?`<tr class="molde-sep"><td colspan="${blk.cols.length+4+(editavel?1:0)}">MOLDES</td></tr>`:'';
-    return `${sep}<tr id="engrow_${blk.key}_${i}"${clsAttr}>${blk.matFirst?mc+un+colsCells:colsCells+mc+un}${molde}${pad}${del}</tr>`;
+    const sep=(isMad && r.molde && !(i>0 && rows[i-1].molde))?`<tr class="molde-sep"><td colspan="${ncolTot}">MOLDES</td></tr>`:'';
+    const acoes=temCol?`<td class="no-print eng-aprov-acoes">${it?engAcoesHTML(eng.id,it):''}</td>`:'';
+    return `${sep}<tr id="engrow_${blk.key}_${i}"${clsAttr}${it&&it.tipo==='novo'?' data-aprovnovo="1" title="Linha incluída — aguardando aprovação"':''}>${blk.matFirst?mcM+un+colsCells:colsCells+mcM+un}${mk(molde,'molde')}${mk(pad,'padrao')}${del}${acoes}</tr>`+(it?engDevolHTML(eng,it,ncolTot):'')+dels(i);
   }).join('');
   const ncols=blk.cols.length+3+(isMad?1:0);
   return `<div class="card eng-block" id="engblock_${blk.key}" style="margin-bottom:18px">
@@ -1687,19 +2010,25 @@ function engBlockCard(eng,blk,idx,editavel){
         ${editavel?`<button class="btn sm danger" onclick="engRemoverBloco('${blk.key}')" title="Excluir este bloco do SKU (pode restaurar depois)">🗑</button>`:''}
       </div>
     </div>
-    <div class="bd" style="padding:0;overflow:auto"><table><thead><tr>${th}${editavel?'<th class="no-print"></th>':''}</tr></thead>
-    <tbody>${body||`<tr><td colspan="${ncols+(editavel?1:0)}" class="muted" style="padding:16px">Sem itens. Clique em “＋ Linha”.</td></tr>`}</tbody>
+    <div class="bd" style="padding:0;overflow:auto"><table><thead><tr>${th}${editavel?'<th class="no-print"></th>':''}${temCol?'<th class="no-print">Aprovação</th>':''}</tr></thead>
+    <tbody>${body||`<tr><td colspan="${ncolTot}" class="muted" style="padding:16px">Sem itens. Clique em “＋ Linha”.</td></tr>`}</tbody>
     </table></div></div>`;
 }
 function engTecidoCard(eng,editavel){
   const tecs=eng.tecidos||[];
-  const body=tecs.map((t,i)=>`<tr>
+  const itT=(eng===engCurrent()) ? ENG_ITENS.filter(x=>x.classe!=null) : []; const temCol=itT.length>0;
+  const ncol=(editavel?5:4)+(temCol?1:0);
+  const body=tecs.map((t,i)=>{ const it=itT.find(x=>x.classe===t.classe && x.tipo!=='tecDel');
+    const mk=(h,k)=>(it && it.tipo==='tecMod' && engCampoMudou(it.antes,t,k)) ? engMarcaTd(h,it.antes[k]) : h;
+    return `<tr${it&&it.tipo==='tecNovo'?' data-aprovnovo="1"':''}>
     <td><b>${t.classe}</b></td>
-    <td style="min-width:180px"><input class="inp" list="engMatList" placeholder="tecido (insumo)" value="${(t.materialCod||'').replace(/"/g,'&quot;')}" onchange="onEngTecMat(${i},this)" ${editavel?'':'disabled'}></td>
+    ${mk(`<td style="min-width:180px"><input class="inp" list="engMatList" placeholder="tecido (insumo)" value="${(t.materialCod||'').replace(/"/g,'&quot;')}" onchange="onEngTecMat(${i},this)" ${editavel?'':'disabled'}></td>`,'materialCod')}
     <td class="muted" id="engtecun_${i}" style="text-align:center;white-space:nowrap;font-weight:600">${(engMatUnid(t)||'—').toString().replace(/</g,'&lt;')}</td>
-    <td style="width:120px"><input class="inp eng-tot" value="${t.consumo==null?'':t.consumo}" placeholder="consumo" oninput="onEngTecEdit(${i},this)" ${editavel?'':'disabled'}></td>
+    ${mk(`<td style="width:120px"><input class="inp eng-tot" value="${t.consumo==null?'':t.consumo}" placeholder="consumo" oninput="onEngTecEdit(${i},this)" ${editavel?'':'disabled'}></td>`,'consumo')}
     ${editavel?`<td class="no-print"><button class="btn sm danger" onclick="engDelTec(${i})">✕</button></td>`:''}
-  </tr>`).join('');
+    ${temCol?`<td class="no-print eng-aprov-acoes">${it?engAcoesHTML(eng.id,it):''}</td>`:''}
+  </tr>`+(it?engDevolHTML(eng,it,ncol):''); }).join('')
+  + itT.filter(x=>x.tipo==='tecDel').map(it=>`<tr class="eng-aprov-del"><td colspan="${ncol-1}"><span class="riscado">🗑 ${engEsc(engDescItem(it))}</span> <span class="muted">(aguardando aprovação)</span></td><td class="no-print eng-aprov-acoes">${engAcoesHTML(eng.id,it)}</td></tr>`+engDevolHTML(eng,it,ncol)).join('');
   return `<div class="card eng-block" id="engblock_tecido" style="margin-bottom:18px">
     <div class="hd">
       <div class="row" style="gap:10px">
@@ -1712,8 +2041,8 @@ function engTecidoCard(eng,editavel){
       </div>
     </div>
     <div class="bd" style="padding:0;overflow:auto"><table><thead><tr>
-      <th>Classe</th><th>Matéria-prima (tecido)</th><th title="Unidade de medida do insumo">Un.</th><th>Consumo</th>${editavel?'<th class="no-print"></th>':''}
-    </tr></thead><tbody>${body||`<tr><td colspan="${editavel?5:4}" class="muted" style="padding:16px">Sem variações. Cadastre tecidos no produto ou clique em “＋ Classe”.</td></tr>`}</tbody></table></div></div>`;
+      <th>Classe</th><th>Matéria-prima (tecido)</th><th title="Unidade de medida do insumo">Un.</th><th>Consumo</th>${editavel?'<th class="no-print"></th>':''}${temCol?'<th class="no-print">Aprovação</th>':''}
+    </tr></thead><tbody>${body||`<tr><td colspan="${ncol}" class="muted" style="padding:16px">Sem variações. Cadastre tecidos no produto ou clique em “＋ Classe”.</td></tr>`}</tbody></table></div></div>`;
 }
 function engRollupHTML(eng){
   const base=custoBase(eng);
@@ -1777,7 +2106,7 @@ function engRecalc(){
   const eng=engCurrent(); if(!eng) return;
   const box=el('engRollup'); if(box) box.innerHTML=engRollupHTML(eng);
   const mb=el('engMateriaisTbl'); if(mb) mb.innerHTML=engMateriaisTabelaInner(eng);
-  engAutoFeed(eng); save();
+  engAutoFeed(engVersaoAprovada(eng)); save();
 }
 function onEngEdit(key,i,colKey,inputEl){ const eng=engCurrent(); if(!eng) return; eng.blocos[key][i][colKey]=inputEl.value; engTocarRevisao(eng); save();
   const r=eng.blocos[key][i];
@@ -1972,7 +2301,7 @@ function engField(f,v){ const eng=engCurrent(); if(!eng) return; eng[f]=v;
 function engAddRow(key){ const eng=engCurrent(); const blk=ENG_BLOCOS.find(b=>b.key===key); const o={}; blk.cols.forEach(c=>o[c[0]]=''); o.materialCod=''; o.materialId=null;
   const arr=engBlock(eng,key);
   if((key==='madeira'||key==='espumas') && arr.length){ const prev=arr[arr.length-1]; o.materialCod=prev.materialCod||''; o.materialId=prev.materialId||null; }
-  arr.push(o); engTocarRevisao(eng); save(); render(); }
+  o.id=uid(); arr.push(o); engTocarRevisao(eng); save(); render(); }
 function engSugereMat(key,i,inp){
   if(inp.value.trim()!=='') return;
   const eng=engCurrent(); const arr=engBlock(eng,key); const prev=arr[i-1];
@@ -1990,7 +2319,7 @@ function engDuplicar(){
   const novoTam=prompt('Tamanho da nova ficha (ex.: 1,80):', '');
   if(novoTam===null) return;
   const eng=JSON.parse(JSON.stringify(base));
-  eng.id=uid(); eng.tamanho=(novoTam||'').trim();
+  eng.id=uid(); eng.tamanho=(novoTam||'').trim(); eng.cadastro='em'; delete eng.aprovado; delete eng.aprovPend; delete eng.devol;
   DB.engenharias.push(eng); engSel=eng.id;
   DB.historico.push({id:uid(),user:SESSION.nome,acao:'Duplicação de ficha (novo tamanho)',campo:eng.sku||eng.item,ant:base.tamanho||'—',novo:eng.tamanho||'(sem tamanho)',data:new Date().toISOString()});
   save(); render();
@@ -2008,7 +2337,7 @@ function engImportarExcel(inputEl){
       const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array',cellDates:true});
       const nome = wb.SheetNames.indexOf('PADRÃO')>=0?'PADRÃO':wb.SheetNames[0];
       const M=XLSX.utils.sheet_to_json(wb.Sheets[nome],{header:1,raw:false,defval:''});
-      const eng=parseEngSheet(M, file.name);
+      const eng=parseEngSheet(M, file.name); eng.cadastro='em';
       DB.engenharias.push(eng); engSel=eng.id;
       DB.historico.push({id:uid(),user:SESSION.nome,acao:'Importação de engenharia',campo:eng.item||file.name,ant:'—',novo:'ficha importada',data:new Date().toISOString()});
       save(); render();
@@ -2051,9 +2380,17 @@ function parseEngSheet(M, fname){
   return { id:uid(), produtoId:null, item, sku, tamanho, tecidos:[], pedido:cell(6,4), lote:cell(6,7), revpor:cell(3,3), criacao:cell(3,7), ultrev:cell(4,7), blocos:B };
 }
 function engSyncSkip(){ document.querySelectorAll('.engchk').forEach(c=>{ const b=el('engblock_'+c.dataset.key); if(b) b.classList.toggle('skip-print', !c.checked); }); }
-function engPrintSelecionados(){ if(!document.querySelector('.engchk:checked')){ alert('Selecione ao menos um bloco.'); return; } engSyncSkip(); document.documentElement.classList.add('print-eng'); window.print(); }
-function engPrintTodos(){ document.querySelectorAll('.eng-block').forEach(b=>b.classList.remove('skip-print')); document.documentElement.classList.add('print-eng'); window.print(); }
-function engPrintBloco(key){ document.querySelectorAll('.eng-block').forEach(b=>b.classList.toggle('skip-print', b.id!=='engblock_'+key)); document.documentElement.classList.add((key==='madeira'||key==='espumas')?'print-vert':'print-eng'); window.print(); }
+// Impressão: enquanto houver alteração não aprovada, imprime a VERSÃO APROVADA (informação antiga).
+function engPrepararImpressao(){
+  const e=engCurrent(); if(!e || !e.aprovado || engModoAprovado) return;
+  const marc={}; document.querySelectorAll('.engchk').forEach(c=>marc[c.dataset.key]=c.checked);
+  engModoAprovado=true; engModoTemp=true; render();
+  document.querySelectorAll('.engchk').forEach(c=>{ if(c.dataset.key in marc) c.checked=marc[c.dataset.key]; });
+}
+function engPrintSelecionados(){ if(!document.querySelector('.engchk:checked')){ alert('Selecione ao menos um bloco.'); return; } engPrepararImpressao(); engSyncSkip(); document.documentElement.classList.add('print-eng'); window.print(); }
+function engPrintTodos(){ engPrepararImpressao(); document.querySelectorAll('.eng-block').forEach(b=>b.classList.remove('skip-print')); document.documentElement.classList.add('print-eng'); window.print(); }
+function engPrintBloco(key){ engPrepararImpressao(); document.querySelectorAll('.eng-block').forEach(b=>b.classList.toggle('skip-print', b.id!=='engblock_'+key)); document.documentElement.classList.add((key==='madeira'||key==='espumas')?'print-vert':'print-eng'); window.print(); }
+window.addEventListener('beforeprint',()=>{ if(SESSION && currentView==='engenharia') engPrepararImpressao(); });
 
 /* ============================================================
    PRODUTOS
@@ -2767,9 +3104,10 @@ function viewConfig(){
   ${isAdmin?`<div class="card" style="margin-top:18px"><div class="hd"><div><h3>Perfis de acesso</h3>
     <div class="desc">Crie perfis e defina se podem editar dados</div></div>
     <button class="btn primary sm" onclick="openPerfil()">＋ Novo perfil</button></div>
-    <div class="bd" style="padding:0"><table><thead><tr><th>Perfil</th><th>Chave</th><th style="text-align:center">Admin</th><th style="text-align:center">Pode editar</th><th>Usuários</th><th></th></tr></thead>
+    <div class="bd" style="padding:0"><table><thead><tr><th>Perfil</th><th>Chave</th><th style="text-align:center">Admin</th><th style="text-align:center">Pode editar</th><th style="text-align:center">Engenharia</th><th>Usuários</th><th></th></tr></thead>
     <tbody>${DB.perfis.map(pf=>`<tr><td><b>${pf.nome}</b></td><td class="muted">${pf.key}</td>
       <td style="text-align:center">${pf.admin?'✅':'—'}</td><td style="text-align:center">${pf.editar?'✅':'—'}</td>
+      <td style="text-align:center;font-size:12px">${pf.admin||pf.engAprova?'✔ aprova':(pf.engAprovacao?'⏳ precisa de aprovação':'—')}</td>
       <td class="muted">${DB.usuarios.filter(u=>u.perfil===pf.key).length}</td>
       <td style="white-space:nowrap">${pf.key==='admin'?'<span class="muted" style="font-size:11px">fixo</span>':`<button class="btn sm" onclick="openPerfil('${pf.key}')">✎</button> <button class="btn sm danger" onclick="excluirPerfil('${pf.key}')">🗑</button>`}</td></tr>`).join('')}</tbody></table></div></div>
 
@@ -2868,6 +3206,9 @@ function openPerfil(key){
       <div class="field"><label>Nome do perfil</label><input class="inp" id="pfNome" value="${(pf.nome||'').replace(/"/g,'&quot;')}" placeholder="ex.: Supervisor"></div>
       <label class="row" style="gap:8px;margin:8px 0"><input type="checkbox" id="pfAdmin" ${pf.admin?'checked':''}> <b>Administrador</b> — vê todos os menus e faz tudo</label>
       <label class="row" style="gap:8px;margin:8px 0"><input type="checkbox" id="pfEditar" ${pf.editar?'checked':''}> <b>Pode editar dados</b> (cadastrar/alterar/excluir). Desmarcado = somente consulta.</label>
+      <div style="border-top:1px solid var(--border);margin:10px 0 4px;padding-top:8px"><b style="font-size:12.5px">Engenharia</b></div>
+      <label class="row" style="gap:8px;margin:6px 0"><input type="checkbox" id="pfEngAprovacao" ${pf.engAprovacao?'checked':''}> <span><b>Alterações na Engenharia precisam de aprovação</b> — ficam em vermelho até o PCP/Administrador aprovar (fichas em primeiro cadastro são livres)</span></label>
+      <label class="row" style="gap:8px;margin:6px 0"><input type="checkbox" id="pfEngAprova" ${pf.engAprova?'checked':''}> <span><b>Pode aprovar alterações da Engenharia</b> — aprova ou devolve com comentário</span></label>
       <div class="hint">Após criar, defina os menus na matriz de <b>Permissões de menu por perfil</b>.</div>
     </div>
     <div class="modal-ft"><button class="btn" onclick="closeModal()">Cancelar</button>
@@ -2876,11 +3217,11 @@ function openPerfil(key){
 }
 function salvarPerfil(key){
   const nome=el('pfNome').value.trim(); if(!nome){ alert('Informe o nome do perfil.'); return; }
-  const admin=el('pfAdmin').checked, editar=el('pfEditar').checked;
-  if(key){ const pf=DB.perfis.find(p=>p.key===key); pf.nome=nome; if(key!=='admin'){ pf.admin=admin; pf.editar=editar; } }
+  const admin=el('pfAdmin').checked, editar=el('pfEditar').checked, engAprovacao=el('pfEngAprovacao').checked, engAprova=el('pfEngAprova').checked;
+  if(key){ const pf=DB.perfis.find(p=>p.key===key); pf.nome=nome; pf.engAprovacao=engAprovacao; pf.engAprova=engAprova; if(key!=='admin'){ pf.admin=admin; pf.editar=editar; } }
   else {
     let k=slugKey(nome); while(DB.perfis.some(p=>p.key===k)) k+='_'+uid().slice(0,3);
-    DB.perfis.push({key:k,nome,admin,editar});
+    DB.perfis.push({key:k,nome,admin,editar,engAprovacao,engAprova});
     if(!admin) DB.menuPerms[k]=baseMenuPerms();
   }
   save(); closeModal(); render();
@@ -2988,7 +3329,7 @@ function toggleTheme(){
 }
 document.getElementById('nav').addEventListener('click',e=>{const b=e.target.closest('button[data-view]');if(b)nav(b.dataset.view);});
 el('lgPass').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
-window.addEventListener('afterprint',()=>{document.querySelectorAll('.eng-block').forEach(b=>b.classList.remove('skip-print'));document.documentElement.classList.remove('print-eng','print-vert');});
+window.addEventListener('afterprint',()=>{document.querySelectorAll('.eng-block').forEach(b=>b.classList.remove('skip-print'));document.documentElement.classList.remove('print-eng','print-vert'); if(engModoTemp){ engModoTemp=false; engModoAprovado=false; render(); } });
 // Conecta automaticamente ao servidor, se já configurado
 cloudAutoStart();
 </script>
