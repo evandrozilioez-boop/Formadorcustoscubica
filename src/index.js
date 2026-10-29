@@ -64,6 +64,44 @@ async function ensureUsuarios(sql, env) {
       VALUES (${crypto.randomUUID()},'Administrador',${email},${await hashPassword(senha)},'admin',true,'Ativo')`;
   }
 }
+/* ---------- Merge de 3 vias (campo a campo) ----------
+   cur = versão no banco, base = versão que o usuário tinha quando começou a editar,
+   loc = versão editada pelo usuário. Só o que ESTE usuário mudou sobrescreve o banco;
+   o resto (mudado por outros) é preservado. Mesmo campo mudado pelos dois = vale o último. */
+const eqJ = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const isObj = (x) => x && typeof x === 'object' && !Array.isArray(x);
+const idArr = (a) => Array.isArray(a) && a.every((e) => isObj(e) && e.id != null);
+function merge3(cur, base, loc) {
+  if (eqJ(loc, base)) return cur;      // eu não mudei → fica o do banco
+  if (eqJ(cur, base)) return loc;      // só eu mudei
+  if (isObj(cur) && isObj(base) && isObj(loc)) {
+    const out = {};
+    for (const k of new Set([...Object.keys(cur), ...Object.keys(loc), ...Object.keys(base)])) {
+      const v = merge3(cur[k], base[k], loc[k]); if (v !== undefined) out[k] = v;
+    }
+    return out;
+  }
+  if (idArr(cur) && idArr(base) && idArr(loc)) return mergeIdArr(cur, base, loc);
+  return loc;                          // os dois mudaram o mesmo campo → vale o último a salvar
+}
+// Listas de itens com id (ex.: variações): mescla item a item.
+function mergeIdArr(cur, base, loc) {
+  const m = (a) => new Map(a.map((e) => [String(e.id), e]));
+  const C = m(cur), B = m(base), out = [], seen = new Set();
+  for (const e of loc) {
+    const id = String(e.id); seen.add(id);
+    if (B.has(id) && !C.has(id)) { if (!eqJ(e, B.get(id))) out.push(e); continue; } // outro excluiu: some, a menos que eu tenha alterado
+    out.push(C.has(id) ? merge3(C.get(id), B.get(id), e) : e);
+  }
+  for (const e of cur) {
+    const id = String(e.id); if (seen.has(id)) continue;
+    if (B.has(id) && eqJ(e, B.get(id))) continue; // eu excluí (e ninguém alterou)
+    out.push(e);                                   // novo de outro usuário (ou alterado por outro)
+  }
+  return out;
+}
+const hasOwn = (o, k) => !!o && Object.prototype.hasOwnProperty.call(o, k);
+
 async function appTokenPayload(request, env) {
   const t = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
   if (!(await verifyToken(t, env))) return null;
@@ -104,6 +142,22 @@ export default {
           if (!u || u.status !== 'Ativo' || !(await verifyPassword(senha || '', u.senha_hash))) {
             return json({ message: 'E-mail ou senha inválidos' }, 401);
           }
+          const token = await signToken({ sub: u.id, email: u.email, nome: u.nome, role: u.perfil, admin: u.admin }, env);
+          return json({ accessToken: token, usuario: { id: u.id, nome: u.nome, email: u.email, perfil: u.perfil, admin: u.admin, role: u.perfil } });
+        } finally { ctx.waitUntil(sql.end()); }
+      }
+
+      // POST /api/auth/refresh → renova o token de quem ainda está logado (sessão não expira no meio do trabalho)
+      if (path === '/api/auth/refresh') {
+        if (request.method !== 'POST') return json({ message: 'Método não permitido' }, 405);
+        const payload = await appTokenPayload(request, env);
+        if (!payload) return json({ message: 'Não autorizado' }, 401);
+        if (!env.HYPERDRIVE || !env.HYPERDRIVE.connectionString) return json({ message: 'Banco não configurado' }, 500);
+        const sql = openSql(env);
+        try {
+          const rows = await sql`SELECT * FROM usuarios WHERE id=${payload.sub}`;
+          const u = rows[0];
+          if (!u || u.status !== 'Ativo') return json({ message: 'Usuário inativo' }, 401);
           const token = await signToken({ sub: u.id, email: u.email, nome: u.nome, role: u.perfil, admin: u.admin }, env);
           return json({ accessToken: token, usuario: { id: u.id, nome: u.nome, email: u.email, perfil: u.perfil, admin: u.admin, role: u.perfil } });
         } finally { ctx.waitUntil(sql.end()); }
@@ -190,14 +244,17 @@ export default {
                 let state = (rows[0] && rows[0].data && typeof rows[0].data === 'object') ? rows[0].data : {};
                 // upserts por chave de registro
                 const ups = delta.upserts || {};
+                const bases = delta.bases || {};
                 for (const col in ups) {
                   const kf = keys[col] || 'id';
                   if (!Array.isArray(state[col])) state[col] = [];
                   const idx = {}; state[col].forEach((r, i) => { if (r && r[kf] != null) idx[r[kf]] = i; });
                   for (const rec of ups[col]) {
                     const k = rec ? rec[kf] : null;
-                    if (k != null && idx[k] != null) state[col][idx[k]] = rec;
-                    else { state[col].push(rec); if (k != null) idx[k] = state[col].length - 1; }
+                    if (k != null && idx[k] != null) {
+                      // com a "base" do usuário: mescla campo a campo; sem base (cliente antigo): substitui
+                      state[col][idx[k]] = hasOwn(bases[col], k) ? merge3(state[col][idx[k]], bases[col][k], rec) : rec;
+                    } else { state[col].push(rec); if (k != null) idx[k] = state[col].length - 1; }
                   }
                 }
                 // deleções por chave de registro
@@ -210,8 +267,8 @@ export default {
                   }
                 }
                 // campos avulsos (último a salvar vence)
-                const sc = delta.scalars || {};
-                for (const k in sc) state[k] = sc[k];
+                const sc = delta.scalars || {}, scb = delta.scalarBases || {};
+                for (const k in sc) state[k] = hasOwn(scb, k) ? merge3(state[k], scb[k], sc[k]) : sc[k];
                 const w = await sql`
                   INSERT INTO app_state (chave, data, "updatedAt")
                   VALUES (${key}, ${sql.json(state)}, now())
