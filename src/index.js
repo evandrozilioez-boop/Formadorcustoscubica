@@ -102,6 +102,30 @@ function mergeIdArr(cur, base, loc) {
 }
 const hasOwn = (o, k) => !!o && Object.prototype.hasOwnProperty.call(o, k);
 
+/* ---------- Aprovação da Engenharia (mesma regra do app) ----------
+   Perfil com engAprovacao (e sem engAprova/admin) não altera a VERSÃO APROVADA de uma ficha com
+   cadastro concluído: o servidor guarda em "aprovado" a versão anterior até um aprovador liberar. */
+const numS = (v) => { const n = parseFloat(String(v).replace(',', '.')); return isFinite(n) ? n : 0; }; // igual ao num() do app
+const engRowSig = (r) => { const o = {}; Object.keys(r || {}).sort().forEach((x) => { const v = r[x]; if (x === 'id' || x[0] === '_' || v === '' || v == null || v === false) return; o[x] = v; }); return JSON.stringify(o); };
+const engTecVazio = (t) => !t || (!t.materialId && !t.materialCod && !numS(t.consumo));
+const engTecSig = (t) => engTecVazio(t) ? '' : JSON.stringify({ m: t.materialCod || '', c: String(t.consumo == null ? '' : t.consumo) });
+function engNorm(c) {
+  const b = {}; Object.keys((c && c.blocos) || {}).sort().forEach((k) => { let rows = (c.blocos[k] || []).map(engRowSig); if (k === 'madeira') rows = rows.sort(); if (rows.length) b[k] = rows; });
+  const t = ((c && c.tecidos) || []).filter((x) => !engTecVazio(x)).map((x) => x.classe + '|' + engTecSig(x)).sort();
+  return JSON.stringify({ b, t, o: [...((c && c.ocultos) || [])].sort(), m: (c && c.madeiraOrd) || '' });
+}
+const engConteudo = (e) => JSON.parse(JSON.stringify({ blocos: e.blocos || {}, tecidos: e.tecidos || [], ocultos: e.ocultos || [], madeiraOrd: e.madeiraOrd || '' }));
+const engEmCadastro = (e) => !!e && (e.cadastro ? e.cadastro === 'em' : engNorm(e) === engNorm({}));
+function exigeAprovacaoEng(state, payload) {
+  if (payload.admin) return false;
+  const pf = (Array.isArray(state.perfis) ? state.perfis : []).find((p) => p && p.key === payload.role);
+  if (!pf || pf.admin) return false;
+  // mesmo padrão do app enquanto o perfil ainda não foi configurado: DESENVOLVIMENTO precisa de aprovação; PCP aprova
+  const precisa = pf.engAprovacao !== undefined ? pf.engAprovacao : /desenvolv/i.test(pf.nome || '');
+  const aprova = pf.engAprova !== undefined ? pf.engAprova : /\bpcp\b/i.test(pf.nome || '');
+  return !!(precisa && !aprova);
+}
+
 async function appTokenPayload(request, env) {
   const t = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
   if (!(await verifyToken(t, env))) return null;
@@ -245,6 +269,9 @@ export default {
                 // upserts por chave de registro
                 const ups = delta.upserts || {};
                 const bases = delta.bases || {};
+                const exige = exigeAprovacaoEng(state, payload);
+                const engAntes = new Map();
+                if (exige && Array.isArray(state.engenharias)) state.engenharias.forEach((e) => { if (e && e.id != null) engAntes.set(e.id, JSON.parse(JSON.stringify(e))); });
                 for (const col in ups) {
                   const kf = keys[col] || 'id';
                   if (!Array.isArray(state[col])) state[col] = [];
@@ -257,12 +284,24 @@ export default {
                     } else { state[col].push(rec); if (k != null) idx[k] = state[col].length - 1; }
                   }
                 }
+                // aprovação da engenharia: a versão aprovada de ficha concluída não muda por este perfil
+                if (exige && Array.isArray(ups.engenharias)) {
+                  for (const rec of ups.engenharias) {
+                    const id = rec && rec.id; const cur = engAntes.get(id); if (!cur || engEmCadastro(cur)) continue;
+                    const m = state.engenharias.find((e) => e && e.id === id); if (!m) continue;
+                    m.cadastro = 'concluido';
+                    const baseline = cur.aprovado || engConteudo(cur);
+                    if (engNorm(m) === engNorm(baseline)) { delete m.aprovado; delete m.aprovPend; delete m.devol; }
+                    else { m.aprovado = baseline; if (!m.aprovPend) m.aprovPend = { por: payload.nome || payload.email || '', em: new Date().toISOString() }; }
+                  }
+                }
                 // deleções por chave de registro
                 const dels = delta.deletes || {};
                 for (const col in dels) {
                   const kf = keys[col] || 'id';
                   if (Array.isArray(state[col])) {
-                    const rm = new Set((dels[col] || []).map(String));
+                    let rm = new Set((dels[col] || []).map(String));
+                    if (exige && col === 'engenharias') rm = new Set([...rm].filter((k) => engEmCadastro(engAntes.get(k)))); // não exclui ficha concluída
                     state[col] = state[col].filter((r) => !(r && rm.has(String(r[kf]))));
                   }
                 }
@@ -281,6 +320,10 @@ export default {
             }
 
             // ---- Modo COMPLETO: substitui todo o estado (migração/backup/forçar envio) ----
+            if (!payload.admin) {
+              const pr2 = await sql`SELECT data->'perfis' AS perfis FROM app_state WHERE chave = ${key}`;
+              if (exigeAprovacaoEng({ perfis: pr2[0] && pr2[0].perfis }, payload)) return json({ message: 'Perfil com aprovação de engenharia não pode substituir todos os dados' }, 403);
+            }
             const data = body.data || {};
             const rows = await sql`
               INSERT INTO app_state (chave, data, "updatedAt")
