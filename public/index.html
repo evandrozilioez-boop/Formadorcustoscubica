@@ -167,6 +167,20 @@ tbody tr:hover{background:var(--surface-2)}
 .molde-tag{font-weight:800;letter-spacing:.5px}
 .print-only{display:none}
 /* Aprovação da Engenharia: alterações pendentes em vermelho */
+/* Desenvolvimento vê as próprias alterações pendentes em AMARELO (PCP/Admin veem em vermelho) */
+html.eng-dev td[data-aprov]{background:rgba(241,196,15,.38)!important;box-shadow:inset 0 0 0 2px #d4a800!important}
+html.eng-dev td[data-aprov] input,html.eng-dev td[data-aprov] select,html.eng-dev tr[data-aprovnovo] input,html.eng-dev tr[data-aprovnovo] select{color:#7a5c00!important}
+html.eng-dev tr[data-aprovnovo]>td{background:rgba(241,196,15,.38)!important}
+html.eng-dev .eng-aprov-del>td{color:#7a5c00;background:rgba(241,196,15,.18)!important}
+html.eng-dev .eng-banner{border-color:#d4a800;background:rgba(241,196,15,.12)}
+/* Impressão de ficha com alterações pendentes: tarja diagonal em todas as páginas */
+.eng-tarja{display:none}
+@media print{ .eng-tarja{display:block!important;position:fixed;left:-25%;top:42%;width:150%;transform:rotate(-32deg);text-align:center;z-index:9999;pointer-events:none;
+  background:rgba(214,48,49,.22);color:rgba(150,0,0,.80);border-top:4px solid rgba(214,48,49,.55);border-bottom:4px solid rgba(214,48,49,.55);
+  font-weight:900;padding:10px 0;white-space:nowrap;line-height:1.15;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .eng-tarja b{display:block;font-size:46px;letter-spacing:4px} .eng-tarja span{display:block;font-size:26px;letter-spacing:2px}
+  /* avisos e janelas nunca saem na impressão */
+  #engNotif,#reloginBox,#saveBanner{display:none!important} }
 td[data-aprov]{background:rgba(214,48,49,.16)!important;box-shadow:inset 0 0 0 2px #d63031}
 td[data-aprov] input,td[data-aprov] select{color:#c0392b!important;font-weight:700}
 tr[data-aprovnovo]>td{background:rgba(214,48,49,.16)!important}
@@ -957,7 +971,7 @@ function render(){
   if(currentView==='calc') initCalc();
   if(currentView==='simulador') initSim();
   travarConsulta(c);
-  try{ engAtualizarAvisos(); }catch(e){}
+  try{ engAtualizarAvisos(); document.documentElement.classList.toggle('eng-dev', engPrecisaAprovacao()); }catch(e){}
   const rb=el('roBadge'); if(rb) rb.style.display=somenteConsulta()?'':'none';
 }
 
@@ -1837,13 +1851,13 @@ function engBannerHTML(eng,itens){
     return `<div class="card no-print eng-banner" style="margin-bottom:14px"><div class="bd">
       <div class="row" style="justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center">
         <div><b style="color:#c0392b">🔴 ${itens.length} alteração(ões) aguardando aprovação</b>${p?` <span class="muted">· enviadas por ${engEsc(p.por)} em ${engDataHora(p.em)}</span>`:''}${devs?` · <b style="color:#b9770e">${devs} devolvida(s)</b>`:''}
-          <div class="muted" style="font-size:12.5px;margin-top:2px">Em vermelho = alterado (passe o mouse para ver o valor antigo). Até a aprovação, a <b>impressão</b> e o <b>custo na Precificação</b> usam a versão aprovada.</div></div>
+          <div class="muted" style="font-size:12.5px;margin-top:2px">Em ${engPrecisaAprovacao()?'amarelo':'vermelho'} = alterado (passe o mouse para ver o valor antigo). Até a aprovação, a <b>impressão</b> e o <b>custo na Precificação</b> usam a versão aprovada.</div></div>
         <div class="row" style="gap:6px">${engPodeAprovar()?`<button class="btn sm primary" onclick="engAprovarTudo('${eng.id}')">✔ Aprovar tudo</button>`:''}<button class="btn sm" onclick="engVerAprovada(true)">👁 Ver versão aprovada</button></div>
       </div>
       ${estrut.length?`<table style="margin-top:10px"><tbody>${estrut.map(it=>{ const d=engDevolAtiva(eng,it); return `<tr><td style="color:#c0392b;font-weight:600">${engEsc(engDescItem(it))}${d?`<div style="color:var(--text);font-weight:400;font-size:12.5px">💬 ${engEsc(d.por)}: “${engEsc(d.coment)}”</div>`:''}</td><td class="eng-aprov-acoes">${engAcoesHTML(eng.id,it)}</td></tr>`; }).join('')}</tbody></table>`:''}
     </div></div>`;
   }
-  if(engPrecisaAprovacao()) return `<div class="no-print muted" style="font-size:12.5px;margin:-6px 0 12px">🔒 Cadastro desta ficha já foi concluído: suas alterações ficarão em vermelho até o PCP/Administrador aprovar.</div>`;
+  if(engPrecisaAprovacao()) return `<div class="no-print muted" style="font-size:12.5px;margin:-6px 0 12px">🔒 Cadastro desta ficha já foi concluído: suas alterações ficarão em amarelo até o PCP/Administrador aprovar.</div>`;
   return '';
 }
 function engListaPendenciasHTML(){
@@ -1854,6 +1868,16 @@ function engListaPendenciasHTML(){
   if(dev && r.devolvidas.length) return `<div class="card no-print" style="margin-bottom:14px;border:2px solid #e8a317"><div class="hd"><div><h3>↩ Devolvidas para correção</h3><div class="desc">${r.devolvidas.length} alteração(ões) devolvida(s) pelo PCP/Administrador</div></div></div>
     <div class="bd" style="padding:0;overflow:auto"><table><tbody>${r.devolvidas.map(({e,it,d})=>`<tr><td><b>${engEsc(e.sku||'—')}</b> · ${engEsc(e.tamanho||'—')}<div style="font-size:12.5px">${engEsc(engDescItem(it))}</div></td><td style="font-size:12.5px">💬 <b>${engEsc(d.por)}</b>: “${engEsc(d.coment)}”</td><td style="text-align:right"><button class="btn sm primary" onclick="engSelId('${e.id}')">Abrir</button></td></tr>`).join('')}</tbody></table></div></div>`;
   return '';
+}
+// Atualiza as marcas da linha editada e o aviso da ficha sem redesenhar a tela (não perde o foco da digitação)
+function engMarcasAoDigitar(td, achar){
+  const e=engCurrent(); if(!e || engModoAprovado) return;
+  ENG_ITENS=engItens(e); const it=ENG_ITENS.find(achar);
+  if(td){ const k=td.dataset.campo, linha=it&&it.row;
+    if(it && (it.tipo==='mod'||it.tipo==='tecMod') && k && engCampoMudou(it.antes,linha,k)){ td.setAttribute('data-aprov','1'); td.title='Antes: '+((it.antes[k]==null||it.antes[k]==='')?'(vazio)':it.antes[k]); }
+    else if(td.hasAttribute('data-aprov')){ td.removeAttribute('data-aprov'); td.removeAttribute('title'); } }
+  const tr=td&&td.closest('tr'); if(tr){ if(it && (it.tipo==='novo'||it.tipo==='tecNovo')) tr.setAttribute('data-aprovnovo','1'); else tr.removeAttribute('data-aprovnovo'); }
+  const bn=el('engAprovBanner'); if(bn) bn.innerHTML=engBannerHTML(e,ENG_ITENS);
 }
 function engNotifAbrir(id){ const b=el('engNotif'); if(b) b.remove(); engSel=id; engModoAprovado=false; nav('engenharia'); }
 
@@ -1932,7 +1956,8 @@ function viewEngenharia(){
     <button class="btn sm" onclick="engAplicarPadroes()" title="Copia apenas os itens marcados como Padrão para as fichas dos outros tamanhos">↧ Só itens padrão</button>`:''}
   </div></div>`;
   h+=engListaPendenciasHTML();
-  h+=engBannerHTML(eng, ENG_ITENS);
+  h+=`<div id="engAprovBanner">${engBannerHTML(eng, ENG_ITENS)}</div>`;
+  if(modoAprov && engPendente(eng)) h+=`<div class="eng-tarja"><b>DESATUALIZADO</b><span>AGUARDANDO APROVAÇÕES</span></div>`;
   h+=`<div class="card no-print" style="margin-bottom:18px"><div class="hd"><div><h3>${eng.item||'—'} <span class="tag blue">${eng.sku||'SKU'}</span></h3><div class="desc">Composição do tamanho <b>${eng.tamanho||'—'}</b> · custo automático pela matéria-prima</div></div></div>
     <div class="bd"><div class="grid g-3">
     ${ENG_IDENT.map(([f,l])=>{ const auto=(f==='revpor'||f==='ultrev'); const attrs=auto?'readonly':(`oninput="engField('${f}',this.value)"`+(editavel?'':' disabled')); return `<div class="field"><label>${l}${auto?' <span class="muted">(auto)</span>':''}</label><input class="inp" id="engid_${f}" value="${(eng[f]||'').toString().replace(/"/g,'&quot;')}" ${attrs}></div>`; }).join('')}
@@ -2109,6 +2134,7 @@ function engRecalc(){
   engAutoFeed(engVersaoAprovada(eng)); save();
 }
 function onEngEdit(key,i,colKey,inputEl){ const eng=engCurrent(); if(!eng) return; eng.blocos[key][i][colKey]=inputEl.value; engTocarRevisao(eng); save();
+  try{ const td=inputEl.closest&&inputEl.closest('td'); if(td) td.dataset.campo=colKey; engMarcasAoDigitar(td, x=>x.blk===key && x.j===i && x.tipo!=='del'); }catch(e){}
   const r=eng.blocos[key][i];
   if(r._pend){ r._pend=false; const tr=el('engrow_'+key+'_'+i); if(tr){ tr.classList.remove('eng-pend'); const b=tr.querySelector('button[title^="Conferir"]'); if(b) b.remove(); } }
   if(key==='papelao' && (colKey==='compr'||colKey==='larg'||colKey==='quant')){
@@ -2281,7 +2307,8 @@ function onEngPickMat(key,i,inputEl){
   if(mat && blk && blk.cols.some(c=>c[0]==='descricao')) r.descricao=mat.descricao;
   engTocarRevisao(eng); save(); render();
 }
-function onEngTecEdit(i,inputEl){ const eng=engCurrent(); if(!eng) return; eng.tecidos[i].consumo=inputEl.value; engTocarRevisao(eng); save(); engRecalc(); }
+function onEngTecEdit(i,inputEl){ const eng=engCurrent(); if(!eng) return; eng.tecidos[i].consumo=inputEl.value; engTocarRevisao(eng); save(); engRecalc();
+  try{ const td=inputEl.closest&&inputEl.closest('td'); if(td) td.dataset.campo='consumo'; const c=eng.tecidos[i].classe; engMarcasAoDigitar(td, x=>x.classe===c && x.tipo!=='tecDel'); }catch(e){} }
 function onEngTecMat(i,inputEl){
   const eng=engCurrent(); if(!eng) return;
   const val=inputEl.value.trim(); const cod=val.includes(' · ')?val.split(' · ')[0].trim():val;
